@@ -1,3 +1,19 @@
+# Wayfreeze
+
+A small CLI tool to freeze the screen of a wlroots compositor, this can be useful to for example take a screenshot.
+
+## Installing
+
+Use the flake idk
+
+## Usage
+
+Flags & options coming soon.tm
+
+```bash
+wayfreeze
+```
+
 ## Credits
 
 In no particular order, here are some resources that were helpful when creating this tool & learning about the Wayland protocol:
