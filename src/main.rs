@@ -6,7 +6,7 @@ use tempfile::tempfile;
 use wayland_client::{
     protocol::{
         wl_buffer, wl_compositor, wl_display, wl_keyboard, wl_output, wl_registry, wl_seat, wl_shm,
-        wl_shm_pool, wl_surface,
+        wl_shm_pool, wl_surface, wl_pointer,
     },
     Connection, Dispatch, EventQueue, Proxy, QueueHandle,
 };
@@ -28,6 +28,7 @@ struct AppData {
     surface: Option<wl_surface::WlSurface>,
     output: Option<wl_output::WlOutput>,
     seat: Option<wl_seat::WlSeat>,
+    pointer: Option<wl_pointer::WlPointer>,
     keyboard: Option<wl_keyboard::WlKeyboard>,
     context: Option<xkb::Context>,
     keymap: Option<xkb::Keymap>,
@@ -81,6 +82,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for AppData {
                     // wl_seat
                     info!("> Bound: {interface} v{version}");
                     let seat: wl_seat::WlSeat = proxy.bind(name, version, queue_handle, ());
+                    state.pointer = Some(seat.get_pointer(queue_handle, ()));
                     state.keyboard = Some(seat.get_keyboard(queue_handle, ()));
                     state.seat = Some(seat);
                 } else if interface == wl_shm::WlShm::interface().name && state.shm.is_none() {
@@ -170,6 +172,33 @@ impl Dispatch<wl_seat::WlSeat, ()> for AppData {
         _connection: &wayland_client::Connection,
         _queue_handle: &wayland_client::QueueHandle<Self>,
     ) {
+    }
+}
+
+impl Dispatch<wl_pointer::WlPointer, ()> for AppData {
+    fn event(
+        state: &mut Self,
+        _proxy: &wl_pointer::WlPointer,
+        event: <wl_pointer::WlPointer as Proxy>::Event,
+        _data: &(),
+        _connection: &wayland_client::Connection,
+        _queue_handle: &wayland_client::QueueHandle<Self>,
+    ) {
+        match event {
+            wl_pointer::Event::Button {
+                state: button_state,
+                ..
+            } => {
+                debug!("| Received wl_pointer::Event::Button");
+                // pointer button event
+                if button_state != wayland_client::WEnum::Value(wl_pointer::ButtonState::Released) {
+                    return;
+                }
+                info!("Mouse button released - exiting...");
+                state.exit = true;
+            }
+            _ => {}
+        }
     }
 }
 
