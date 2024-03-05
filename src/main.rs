@@ -482,11 +482,8 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for AppData {
 }
 
 struct ScreenFreezer {
-    connection: Connection,
     event_queue: EventQueue<AppData>,
     queue_handle: QueueHandle<AppData>,
-    display: wl_display::WlDisplay,
-    registry: wl_registry::WlRegistry,
     state: AppData,
 }
 
@@ -496,7 +493,7 @@ impl ScreenFreezer {
         let mut event_queue = connection.new_event_queue();
         let queue_handle = event_queue.handle();
         let display = connection.display();
-        let registry = display.get_registry(&queue_handle, ());
+        let _registry = display.get_registry(&queue_handle, ());
         let mut state = AppData::default();
 
         event_queue.roundtrip(&mut state).unwrap();
@@ -507,11 +504,8 @@ impl ScreenFreezer {
         event_queue.blocking_dispatch(&mut state).unwrap();
 
         Ok(Self {
-            connection,
             event_queue,
             queue_handle,
-            display,
-            registry,
             state,
         })
     }
