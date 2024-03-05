@@ -5,10 +5,10 @@ use std::os::unix::io::AsFd;
 use tempfile::tempfile;
 use wayland_client::{
     protocol::{
-        wl_buffer, wl_compositor, wl_keyboard, wl_output, wl_registry,
-        wl_seat, wl_shm, wl_shm_pool, wl_surface,
+        wl_buffer, wl_compositor, wl_display, wl_keyboard, wl_output, wl_registry, wl_seat, wl_shm,
+        wl_shm_pool, wl_surface,
     },
-    Connection, Dispatch, Proxy,
+    Connection, Dispatch, EventQueue, Proxy, QueueHandle,
 };
 use wayland_protocols_wlr::{
     layer_shell::v1::client::{
@@ -481,54 +481,88 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for AppData {
     }
 }
 
+struct ScreenFreezer {
+    connection: Connection,
+    event_queue: EventQueue<AppData>,
+    queue_handle: QueueHandle<AppData>,
+    display: wl_display::WlDisplay,
+    registry: wl_registry::WlRegistry,
+    state: AppData,
+}
+
+impl ScreenFreezer {
+    fn new() -> Result<Self, Box<dyn Error>> {
+        let connection = Connection::connect_to_env().unwrap();
+        let mut event_queue = connection.new_event_queue();
+        let queue_handle = event_queue.handle();
+        let display = connection.display();
+        let registry = display.get_registry(&queue_handle, ());
+        let mut state = AppData::default();
+
+        event_queue.roundtrip(&mut state).unwrap();
+
+        state.context = Some(xkb::Context::new(xkb::CONTEXT_NO_FLAGS));
+
+        // block to receive wl_keyboard::Event::Keymap & wl_output::Event::Mode
+        event_queue.blocking_dispatch(&mut state).unwrap();
+
+        Ok(Self {
+            connection,
+            event_queue,
+            queue_handle,
+            display,
+            registry,
+            state,
+        })
+    }
+    pub fn freeze(&mut self) -> Result<(), Box<dyn Error>> {
+        let Some(output) = &self.state.output else {
+            error!("No WlOutput loaded");
+            return Ok(());
+        };
+        let Some(surface) = &self.state.surface else {
+            error!("No WlSurface loaded");
+            return Ok(());
+        };
+        let Some(layer_shell) = &self.state.layer_shell else {
+            error!("No ZwlrLayerShellV1 loaded");
+            return Ok(());
+        };
+        let layer_surface = zwlr_layer_shell_v1::ZwlrLayerShellV1::get_layer_surface(
+            layer_shell,
+            &surface,
+            Some(&output),
+            Layer::Overlay,
+            "wayfreeze".to_string(),
+            &self.queue_handle,
+            (),
+        );
+        layer_surface.set_size(self.state.width as u32, self.state.height as u32);
+        layer_surface.set_anchor(Anchor::Top | Anchor::Right | Anchor::Bottom | Anchor::Left);
+        layer_surface.set_exclusive_zone(-1); // extend surface to achored edges
+        layer_surface.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
+        self.state.layer_surface = Some(layer_surface);
+
+        surface.commit(); // commit without before attaching any buffers
+
+        info!("Screen frozen");
+
+        loop {
+            self.event_queue.blocking_dispatch(&mut self.state).unwrap();
+            if self.state.exit {
+                std::process::exit(0);
+            }
+        }
+    }
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
 
-    let connection = Connection::connect_to_env().unwrap();
-    let mut event_queue = connection.new_event_queue();
-    let queue_handle = event_queue.handle();
-    //let display = connection.display();
-    //let registry = display.get_registry(&queue_handle, ());
-    let mut state = AppData::default();
-
-    state.context = Some(xkb::Context::new(xkb::CONTEXT_NO_FLAGS));
-
-    // block to receive wl_keyboard::Event::Keymap & wl_output::Event::Mode
-    event_queue.blocking_dispatch(&mut state).unwrap();
-
-    let Some(output) = &state.output else {
-        error!("No WlOutput loaded");
-        return Ok(());
-    };
-    let Some(surface) = &state.surface else {
-        error!("No WlSurface loaded");
-        return Ok(());
-    };
-    let Some(layer_shell) = &state.layer_shell else {
-        error!("No ZwlrLayerShellV1 loaded");
-        return Ok(());
+    match ScreenFreezer::new() {
+        Ok(mut sf) => sf.freeze().unwrap(),
+        Err(e) => panic!("Could not create ScreenFreezer: {}", e),
     };
 
-    let layer_surface = zwlr_layer_shell_v1::ZwlrLayerShellV1::get_layer_surface(
-        layer_shell,
-        &surface,
-        Some(&output),
-        Layer::Overlay,
-        "wayfreeze".to_string(),
-        &queue_handle,
-        (),
-    );
-    layer_surface.set_size(state.width as u32, state.height as u32);
-    layer_surface.set_anchor(Anchor::Top | Anchor::Right | Anchor::Bottom | Anchor::Left);
-    layer_surface.set_exclusive_zone(-1); // extend surface to achored edges
-    layer_surface.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
-    surface.commit(); // commit without before attaching any buffers
-    state.layer_surface = Some(layer_surface);
-
-    loop {
-        event_queue.blocking_dispatch(&mut state).unwrap();
-        if state.exit {
-            std::process::exit(0);
-        }
-    }
+    Ok(())
 }
