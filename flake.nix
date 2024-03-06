@@ -31,8 +31,8 @@
             src = ./.;
             cargoLock.lockFile = ./Cargo.lock;
             doCheck = true;
-            nativeBuildInputs = with pkgs; [rustfmt rustc cargo];
-            buildInputs = with pkgs; [];
+            nativeBuildInputs = [];
+            buildInputs = with pkgs; [libxkbcommon];
           };
         };
       };
