@@ -35,8 +35,6 @@ struct AppData {
     kbstate: Option<xkb::State>,
     width: i32,
     height: i32,
-    stride: i32,
-    pool_size: i32,
     shm: Option<wl_shm::WlShm>,
     buffer: Option<wl_buffer::WlBuffer>,
     pool: Option<wl_shm_pool::WlShmPool>,
@@ -145,8 +143,6 @@ impl Dispatch<wl_output::WlOutput, ()> for AppData {
             // describes an available output mode for the output
             state.width = width;
             state.height = height;
-            state.stride = state.width * 4; // stride = number of bytes on one row, there are 4 bytes per pixel (pixel format is 32 bits -> 4 bytes)
-            state.pool_size = state.height * state.stride; // height * width * 4 -> total size of the pool
         };
     }
 }
@@ -379,11 +375,12 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for AppData {
 
                 // create pool
                 let tmp = tempfile().ok().expect("Unable to create tempfile");
-                tmp.set_len(state.pool_size as u64).unwrap();
+                let pool_size = state.height * state.width * 4; // height * width * 4 -> total size of the pool
+                tmp.set_len(pool_size as u64).unwrap();
                 let pool: wl_shm_pool::WlShmPool = wl_shm::WlShm::create_pool(
                     &shm,
                     tmp.as_fd(),
-                    state.pool_size,
+                    pool_size,
                     &queue_handle,
                     (),
                 );
