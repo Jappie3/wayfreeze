@@ -563,7 +563,7 @@ impl ScreenFreezer {
         layer_surface.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
         self.state.layer_surface = Some(layer_surface);
 
-        surface.commit(); // commit without before attaching any buffers
+        surface.commit(); // commit before attaching any buffers
 
         info!("Screen frozen");
 
