@@ -559,7 +559,7 @@ impl ScreenFreezer {
         );
         layer_surface.set_size(self.state.width as u32, self.state.height as u32);
         layer_surface.set_anchor(Anchor::Top | Anchor::Right | Anchor::Bottom | Anchor::Left);
-        layer_surface.set_exclusive_zone(-1); // extend surface to achored edges
+        layer_surface.set_exclusive_zone(-1); // extend surface to anchored edges
         layer_surface.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
         self.state.layer_surface = Some(layer_surface);
 
