@@ -40,7 +40,7 @@ struct AppData {
     pool: Option<wl_shm_pool::WlShmPool>,
     screencopy_manager: Option<(ZwlrScreencopyManagerV1, u32)>,
     screencopy_frame: Option<ZwlrScreencopyFrameV1>,
-    layer_shell: Option<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
+    layer_shell: Option<(zwlr_layer_shell_v1::ZwlrLayerShellV1, u32)>,
     layer_surface: Option<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1>,
     exit: bool,
 }
@@ -99,24 +99,28 @@ impl Dispatch<wl_registry::WlRegistry, ()> for AppData {
                 {
                     // zwlr_layer_shell_v1
                     info!("> Bound: {interface} v{version}");
-                    state.layer_shell = Some(proxy.bind(name, version, queue_handle, ()));
+                    state.layer_shell = Some((proxy.bind(name, version, queue_handle, ()), name));
                 };
             }
             wl_registry::Event::GlobalRemove { name } => {
                 debug!("| Received wl_registry::Event::GlobalRemove");
                 if let Some((_, compositor_name)) = &state.compositor {
                     if name == *compositor_name {
-                        warn!("Compositor was removed!");
+                        warn!("Compositor was removed");
                         state.compositor = None;
-                        // state.surface = None;
+                        state.surface = None;
                     }
                 } else if let Some((_, screencopymanager_name)) = &state.screencopy_manager {
                     if name == *screencopymanager_name {
-                        warn!("ScreencopyManager was removed!");
+                        warn!("ZwlrScreencopyManagerV1 was removed");
                         state.screencopy_manager = None;
                     }
+                } else if let Some((_, layer_shell_name)) = &state.layer_shell {
+                    if name == *layer_shell_name {
+                        warn!("ZwlrLayerShellV1 was removed");
+                        state.layer_shell = None;
+                    }
                 }
-                // TODO
             }
             _ => {}
         }
@@ -544,7 +548,7 @@ impl ScreenFreezer {
             error!("No WlSurface loaded");
             return Ok(());
         };
-        let Some(layer_shell) = &self.state.layer_shell else {
+        let Some((layer_shell, _)) = &self.state.layer_shell else {
             error!("No ZwlrLayerShellV1 loaded");
             return Ok(());
         };
