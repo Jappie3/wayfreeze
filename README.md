@@ -4,7 +4,17 @@ A small CLI tool to freeze the screen of a wlroots compositor, this can be usefu
 
 ## Installing
 
-Use the flake idk
+Add the flake as an input:
+
+```nix
+wayfreeze.url = "github:jappie3/wayfreeze";
+```
+
+Install the package:
+
+```nix
+environment.systemPackages = [inputs.wayfreeze.packages.${pkgs.system}.wayfreeze];
+```
 
 ## Usage
 
