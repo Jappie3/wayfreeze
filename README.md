@@ -1,27 +1,24 @@
 # Wayfreeze
 
-A small CLI tool to freeze the screen of a wlroots compositor, this can be useful to for example take a screenshot.
-
-## Installing
-
-Add the flake as an input:
-
-```nix
-wayfreeze.url = "github:jappie3/wayfreeze";
-```
-
-Install the package:
-
-```nix
-environment.systemPackages = [inputs.wayfreeze.packages.${pkgs.system}.wayfreeze];
-```
+A small CLI tool to freeze the screen of a wlroots compositor, this can be useful to, for example, take a screenshot.
 
 ## Usage
 
-Flags & options coming soon.tm
+Run `wayfreeze`, click or press escape to exit.
 
 ```bash
-wayfreeze
+Usage: wayfreeze [OPTIONS]
+
+Options:
+      --hide-cursor  Hide cursor when freezing the screen
+  -h, --help         Print help
+  -V, --version      Print version
+```
+
+Example usage with Grim & Slurp:
+
+```bash
+wayfreeze & PID=$!; sleep .1; grim -g "$(slurp)" - | wl-copy; kill $PID
 ```
 
 ## Credits
