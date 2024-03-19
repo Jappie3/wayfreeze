@@ -5,7 +5,7 @@ use std::os::unix::io::AsFd;
 use tempfile::tempfile;
 use wayland_client::{
     protocol::{
-        wl_buffer, wl_compositor, wl_display, wl_keyboard, wl_output, wl_registry, wl_seat, wl_shm,
+        wl_buffer, wl_compositor, wl_keyboard, wl_output, wl_registry, wl_seat, wl_shm,
         wl_shm_pool, wl_surface, wl_pointer,
     },
     Connection, Dispatch, EventQueue, Proxy, QueueHandle,
