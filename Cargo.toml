@@ -12,6 +12,6 @@ env_logger = "0.11.2"
 log = "0.4.20"
 tempfile = "3.10.0"
 wayland-client = "0.31.2"
-wayland-protocols-wlr = {version="0.2.0", features = ["client"]}
+wayland-protocols-wlr = { version = "0.2.0", features = ["client"] }
 wayland-server = "0.31.1"
 xkbcommon = "0.7.0"
