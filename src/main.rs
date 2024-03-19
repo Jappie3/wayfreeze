@@ -5,8 +5,8 @@ use std::os::unix::io::AsFd;
 use tempfile::tempfile;
 use wayland_client::{
     protocol::{
-        wl_buffer, wl_compositor, wl_keyboard, wl_output, wl_registry, wl_seat, wl_shm,
-        wl_shm_pool, wl_surface, wl_pointer,
+        wl_buffer, wl_compositor, wl_keyboard, wl_output, wl_pointer, wl_registry, wl_seat, wl_shm,
+        wl_shm_pool, wl_surface,
     },
     Connection, Dispatch, EventQueue, Proxy, QueueHandle,
 };
@@ -381,13 +381,8 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for AppData {
                 let tmp = tempfile().ok().expect("Unable to create tempfile");
                 let pool_size = state.height * state.width * 4; // height * width * 4 -> total size of the pool
                 tmp.set_len(pool_size as u64).unwrap();
-                let pool: wl_shm_pool::WlShmPool = wl_shm::WlShm::create_pool(
-                    &shm,
-                    tmp.as_fd(),
-                    pool_size,
-                    &queue_handle,
-                    (),
-                );
+                let pool: wl_shm_pool::WlShmPool =
+                    wl_shm::WlShm::create_pool(&shm, tmp.as_fd(), pool_size, &queue_handle, ());
 
                 // create screencopyframe from output
                 // TODO flag for cursor visibility
