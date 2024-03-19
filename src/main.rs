@@ -1,3 +1,4 @@
+use clap::Parser;
 use env_logger;
 use log::{debug, error, info, warn};
 use std::error::Error;
@@ -42,6 +43,7 @@ struct AppData {
     screencopy_frame: Option<ZwlrScreencopyFrameV1>,
     layer_shell: Option<(zwlr_layer_shell_v1::ZwlrLayerShellV1, u32)>,
     layer_surface: Option<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1>,
+    hide_cursor: bool,
     exit: bool,
 }
 
@@ -385,9 +387,12 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for AppData {
                     wl_shm::WlShm::create_pool(&shm, tmp.as_fd(), pool_size, &queue_handle, ());
 
                 // create screencopyframe from output
-                // TODO flag for cursor visibility
-                let screencopy_frame =
-                    screencopy_manager.capture_output(1, &output, &queue_handle, ());
+                let screencopy_frame = screencopy_manager.capture_output(
+                    !state.hide_cursor as i32,
+                    &output,
+                    &queue_handle,
+                    (),
+                );
                 state.screencopy_frame = Some(screencopy_frame);
                 state.pool = Some(pool);
             }
@@ -513,13 +518,14 @@ struct ScreenFreezer {
 }
 
 impl ScreenFreezer {
-    fn new() -> Result<Self, Box<dyn Error>> {
+    fn new(hide_cursor: bool) -> Result<Self, Box<dyn Error>> {
         let connection = Connection::connect_to_env().unwrap();
         let mut event_queue = connection.new_event_queue();
         let queue_handle = event_queue.handle();
         let display = connection.display();
         let _registry = display.get_registry(&queue_handle, ());
         let mut state = AppData::default();
+        state.hide_cursor = hide_cursor;
 
         event_queue.roundtrip(&mut state).unwrap();
 
@@ -575,10 +581,20 @@ impl ScreenFreezer {
     }
 }
 
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Hide cursor when freezing the screen.
+    #[arg(long, default_value_t = false)]
+    hide_cursor: bool,
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
+    let args = Args::parse();
+    info!(target: "main", "Parsed arguments");
 
-    match ScreenFreezer::new() {
+    match ScreenFreezer::new(args.hide_cursor) {
         Ok(mut sf) => sf.freeze().unwrap(),
         Err(e) => panic!("Could not create ScreenFreezer: {}", e),
     };
