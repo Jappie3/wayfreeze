@@ -26,8 +26,8 @@
         packages = {
           default = self'.packages.wayfreeze;
           wayfreeze = pkgs.rustPlatform.buildRustPackage {
-            name = "Wayfreeze";
-            pname = "Wayfreeze";
+            name = "wayfreeze";
+            pname = "wayfreeze";
             src = ./.;
             cargoLock.lockFile = ./Cargo.lock;
             doCheck = true;
