@@ -21,6 +21,20 @@ Example usage with Grim & Slurp:
 wayfreeze & PID=$!; sleep .1; grim -g "$(slurp)" - | wl-copy; kill $PID
 ```
 
+## Installing
+
+Add the flake as an input:
+
+```nix
+wayfreeze.url = "github:jappie3/wayfreeze";
+```
+
+Install the package:
+
+```nix
+environment.systemPackages = [inputs.wayfreeze.packages.${pkgs.system}.wayfreeze];
+```
+
 ## Credits
 
 In no particular order, here are some resources that were helpful when creating this tool & learning about the Wayland protocol:
