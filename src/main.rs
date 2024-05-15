@@ -11,6 +11,13 @@ use wayland_client::{
     },
     Connection, Dispatch, EventQueue, Proxy, QueueHandle,
 };
+use wayland_protocols::wp::{
+    fractional_scale::v1::client::{
+        wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1,
+        wp_fractional_scale_v1::{self, WpFractionalScaleV1},
+    },
+    viewporter::{client::wp_viewport::WpViewport, client::wp_viewporter::WpViewporter},
+};
 use wayland_protocols_wlr::{
     layer_shell::v1::client::{
         zwlr_layer_shell_v1::{self, Layer},
@@ -36,9 +43,13 @@ struct AppData {
     kbstate: Option<xkb::State>,
     width: i32,
     height: i32,
+    scale: u32,
     shm: Option<wl_shm::WlShm>,
     buffer: Option<wl_buffer::WlBuffer>,
     pool: Option<wl_shm_pool::WlShmPool>,
+    fs_manager: Option<(WpFractionalScaleManagerV1, u32)>,
+    viewporter: Option<WpViewporter>,
+    viewport: Option<WpViewport>,
     screencopy_manager: Option<(ZwlrScreencopyManagerV1, u32)>,
     screencopy_frame: Option<ZwlrScreencopyFrameV1>,
     layer_shell: Option<(zwlr_layer_shell_v1::ZwlrLayerShellV1, u32)>,
@@ -89,6 +100,16 @@ impl Dispatch<wl_registry::WlRegistry, ()> for AppData {
                     // wl_shm
                     info!("> Bound: {interface} v{version}");
                     state.shm = Some(proxy.bind(name, version, queue_handle, ()));
+                } else if interface == WpFractionalScaleManagerV1::interface().name
+                    && state.fs_manager.is_none()
+                {
+                    // wp_fractional_scale_manager_v1
+                    info!("> Bound: {interface} v{version}");
+                    state.fs_manager = Some((proxy.bind(name, version, queue_handle, ()), name));
+                } else if interface == WpViewporter::interface().name && state.viewporter.is_none()
+                {
+                    // wp_viewporter
+                    state.viewporter = Some(proxy.bind(name, version, queue_handle, ()));
                 } else if interface == ZwlrScreencopyManagerV1::interface().name
                     && state.screencopy_manager.is_none()
                 {
@@ -511,6 +532,88 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for AppData {
     }
 }
 
+// has no events
+impl Dispatch<WpFractionalScaleManagerV1, ()> for AppData {
+    fn event(
+        _state: &mut Self,
+        _proxy: &WpFractionalScaleManagerV1,
+        _event: <WpFractionalScaleManagerV1 as Proxy>::Event,
+        _data: &(),
+        _connection: &wayland_client::Connection,
+        _queue_handle: &wayland_client::QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<WpFractionalScaleV1, ()> for AppData {
+    fn event(
+        state: &mut Self,
+        _proxy: &WpFractionalScaleV1,
+        event: <WpFractionalScaleV1 as Proxy>::Event,
+        _data: &(),
+        _connection: &wayland_client::Connection,
+        _queue_handle: &wayland_client::QueueHandle<Self>,
+    ) {
+        match event {
+            wp_fractional_scale_v1::Event::PreferredScale { scale, .. } => {
+                // notifies of a new preferred scale for this surface
+                debug!("| Received wp_fractional_scale_v1::Event::PreferredScale");
+                debug!("SCALE: {}", scale);
+                state.scale = scale;
+
+                let Some(layer_surface) = &state.layer_surface else {
+                    error!("No ZwlrLayerSurfaceV1 loaded");
+                    return;
+                };
+                let Some(viewport) = &state.viewport else {
+                    error!("No WpViewPortV1 loaded");
+                    return;
+                };
+
+                // set source & destination rectangle
+                viewport.set_source(0.0, 0.0, state.width as f64, state.height as f64);
+                viewport.set_destination(
+                    (state.width as f64 / (state.scale as f64 / 120.0)) as i32,
+                    (state.height as f64 / (state.scale as f64 / 120.0)) as i32,
+                );
+
+                // update layer surface size every time the preferred scale changes
+                layer_surface.set_size(
+                    (state.width as f64 / (state.scale as f64 / 120.0)) as u32,
+                    (state.height as f64 / (state.scale as f64 / 120.0)) as u32,
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+// has no events
+impl Dispatch<WpViewporter, ()> for AppData {
+    fn event(
+        _state: &mut Self,
+        _proxy: &WpViewporter,
+        _event: <WpViewporter as Proxy>::Event,
+        _data: &(),
+        _connection: &wayland_client::Connection,
+        _queue_handle: &wayland_client::QueueHandle<Self>,
+    ) {
+    }
+}
+
+// has no events
+impl Dispatch<WpViewport, ()> for AppData {
+    fn event(
+        _state: &mut Self,
+        _proxy: &WpViewport,
+        _event: <WpViewport as Proxy>::Event,
+        _data: &(),
+        _connection: &wayland_client::Connection,
+        _queue_handle: &wayland_client::QueueHandle<Self>,
+    ) {
+    }
+}
+
 struct ScreenFreezer {
     event_queue: EventQueue<AppData>,
     queue_handle: QueueHandle<AppData>,
@@ -541,33 +644,70 @@ impl ScreenFreezer {
         })
     }
     pub fn freeze(&mut self) -> Result<(), Box<dyn Error>> {
-        let Some(output) = &self.state.output else {
-            error!("No WlOutput loaded");
-            return Ok(());
-        };
+        {
+            let Some(output) = &self.state.output else {
+                error!("No WlOutput loaded");
+                return Ok(());
+            };
+            let Some(surface) = &self.state.surface else {
+                error!("No WlSurface loaded");
+                return Ok(());
+            };
+            let Some(viewporter) = &self.state.viewporter else {
+                error!("No WpViewPorterV1 loaded");
+                return Ok(());
+            };
+            let Some((fs_manager, _)) = &self.state.fs_manager else {
+                error!("No WpFractionalScaleManagerV1 loaded");
+                return Ok(());
+            };
+            let Some((layer_shell, _)) = &self.state.layer_shell else {
+                error!("No ZwlrLayerShellV1 loaded");
+                return Ok(());
+            };
+
+            // create a layer surface & store it for later
+            self.state.layer_surface = Some(zwlr_layer_shell_v1::ZwlrLayerShellV1::get_layer_surface(
+                layer_shell,
+                &surface,
+                Some(&output),
+                Layer::Overlay,
+                "wayfreeze".to_string(),
+                &self.queue_handle,
+                (),
+            ));
+
+            // instantiates an interface extension for the wl_surface to crop & scale its content
+            self.state.viewport = Some(viewporter.get_viewport(&surface, &self.queue_handle, ()));
+
+            // create add-on object for the surface so that compositor can request fractional scales, will send preferred_scale event
+            fs_manager.get_fractional_scale(&surface, &self.queue_handle, ());
+            // wait for the PreferredScale event
+            self.event_queue.blocking_dispatch(&mut self.state).unwrap();
+            
+        }
+        
         let Some(surface) = &self.state.surface else {
             error!("No WlSurface loaded");
             return Ok(());
         };
-        let Some((layer_shell, _)) = &self.state.layer_shell else {
-            error!("No ZwlrLayerShellV1 loaded");
+        let Some(layer_surface) = &self.state.layer_surface else {
+            error!("No ZwlrLayerSurfaceV1 loaded");
             return Ok(());
         };
-        let layer_surface = zwlr_layer_shell_v1::ZwlrLayerShellV1::get_layer_surface(
-            layer_shell,
-            &surface,
-            Some(&output),
-            Layer::Overlay,
-            "wayfreeze".to_string(),
-            &self.queue_handle,
-            (),
+
+        // commit viewport set_source & set_destination in response to PreferredScale event
+        surface.commit();
+
+        debug!("SETTING SCALE: {}",self.state.scale);
+        // scale will always be 1 here, later PreferredScale event can update it
+        layer_surface.set_size(
+            (self.state.width as f64 / (self.state.scale as f64 / 120.0)) as u32,
+            (self.state.height as f64 / (self.state.scale as f64 / 120.0)) as u32,
         );
-        layer_surface.set_size(self.state.width as u32, self.state.height as u32);
         layer_surface.set_anchor(Anchor::Top | Anchor::Right | Anchor::Bottom | Anchor::Left);
         layer_surface.set_exclusive_zone(-1); // extend surface to anchored edges
         layer_surface.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
-        self.state.layer_surface = Some(layer_surface);
-
         surface.commit(); // commit before attaching any buffers
 
         info!("Screen frozen");
