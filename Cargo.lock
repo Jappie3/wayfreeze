@@ -382,6 +382,7 @@ dependencies = [
  "log",
  "tempfile",
  "wayland-client",
+ "wayland-protocols",
  "wayland-protocols-wlr",
  "wayland-server",
  "xkbcommon",
