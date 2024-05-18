@@ -559,7 +559,6 @@ impl Dispatch<WpFractionalScaleV1, ()> for AppData {
             wp_fractional_scale_v1::Event::PreferredScale { scale, .. } => {
                 // notifies of a new preferred scale for this surface
                 debug!("| Received wp_fractional_scale_v1::Event::PreferredScale");
-                debug!("SCALE: {}", scale);
                 state.scale = scale;
 
                 let Some(layer_surface) = &state.layer_surface else {
@@ -700,7 +699,6 @@ impl ScreenFreezer {
         // commit viewport set_source & set_destination in response to PreferredScale event
         surface.commit();
 
-        debug!("SETTING SCALE: {}",self.state.scale);
         // scale will always be 1 here, later PreferredScale event can update it
         layer_surface.set_size(
             (self.state.width as f64 / (self.state.scale as f64 / 120.0)) as u32,
