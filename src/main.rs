@@ -634,9 +634,6 @@ impl ScreenFreezer {
 
         state.context = Some(xkb::Context::new(xkb::CONTEXT_NO_FLAGS));
 
-        // block to receive wl_keyboard::Event::Keymap & wl_output::Event::Mode
-        event_queue.blocking_dispatch(&mut state).unwrap();
-
         Ok(Self {
             event_queue,
             queue_handle,
