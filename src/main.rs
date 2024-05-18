@@ -342,6 +342,7 @@ impl Dispatch<wl_buffer::WlBuffer, ()> for AppData {
         _queue_handle: &wayland_client::QueueHandle<Self>,
     ) {
         if let wl_buffer::Event::Release = event {
+            debug!("| Received wl_buffer::Event::Release");
             let Some(buffer) = &state.buffer else {
                 error!("No WlBuffer loaded");
                 return;
