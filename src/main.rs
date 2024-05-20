@@ -335,7 +335,7 @@ impl Dispatch<wl_shm::WlShm, ()> for AppData {
 impl Dispatch<wl_buffer::WlBuffer, ()> for AppData {
     fn event(
         state: &mut Self,
-        _proxy: &wl_buffer::WlBuffer,
+        proxy: &wl_buffer::WlBuffer,
         event: <wl_buffer::WlBuffer as Proxy>::Event,
         _data: &(),
         _connection: &wayland_client::Connection,
@@ -343,11 +343,7 @@ impl Dispatch<wl_buffer::WlBuffer, ()> for AppData {
     ) {
         if let wl_buffer::Event::Release = event {
             debug!("| Received wl_buffer::Event::Release");
-            let Some(buffer) = &state.buffer else {
-                error!("No WlBuffer loaded");
-                return;
-            };
-            buffer.destroy();
+            proxy.destroy();
         }
     }
 }
@@ -368,7 +364,7 @@ impl Dispatch<zwlr_layer_shell_v1::ZwlrLayerShellV1, ()> for AppData {
 impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for AppData {
     fn event(
         state: &mut Self,
-        _proxy: &zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+        proxy: &zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
         event: <zwlr_layer_surface_v1::ZwlrLayerSurfaceV1 as Proxy>::Event,
         _data: &(),
         _connection: &wayland_client::Connection,
@@ -381,12 +377,8 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for AppData {
                 height: _,
             } => {
                 debug!("| Received zwlr_layer_surface_v1::Event::Configure");
-                let Some(layer_surface) = &state.layer_surface else {
-                    error!("No ZwlrLayerSurfaceV1 loaded");
-                    return;
-                };
                 // acknowledge the Configure event
-                layer_surface.ack_configure(serial);
+                proxy.ack_configure(serial);
 
                 let Some(output) = &state.output else {
                     error!("No WlOutput loaded");
@@ -419,11 +411,7 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for AppData {
                 state.pool = Some(pool);
             }
             zwlr_layer_surface_v1::Event::Closed => {
-                let Some(layer_surface) = &state.layer_surface else {
-                    error!("No ZwlrLayerSurfaceV1 loaded");
-                    return;
-                };
-                layer_surface.destroy();
+                proxy.destroy();
             }
             _ => (),
         }
@@ -446,7 +434,7 @@ impl Dispatch<ZwlrScreencopyManagerV1, ()> for AppData {
 impl Dispatch<ZwlrScreencopyFrameV1, ()> for AppData {
     fn event(
         state: &mut Self,
-        _proxy: &ZwlrScreencopyFrameV1,
+        proxy: &ZwlrScreencopyFrameV1,
         event: <ZwlrScreencopyFrameV1 as Proxy>::Event,
         _data: &(),
         _connection: &wayland_client::Connection,
@@ -483,24 +471,16 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for AppData {
                 debug!("| Received zwlr_screencopy_frame_v1::Event::BufferDone");
                 // all buffer types are reported, proceed to send copy request
                 // after copy -> wait for Event::Ready
-                let Some(screencopy_frame) = &state.screencopy_frame else {
-                    error!("No WlScreencopyFrameV1 loaded");
-                    return;
-                };
                 let Some(buffer) = &state.buffer else {
                     error!("No WlBuffer loaded");
                     return;
                 };
                 // copy frame to buffer, sends Ready when successful
-                screencopy_frame.copy(&buffer);
+                proxy.copy(&buffer);
             }
             zwlr_screencopy_frame_v1::Event::Ready { .. } => {
                 debug!("| Received zwlr_screencopy_frame_v1::Event::Ready");
                 // copy done, frame is available for reading
-                let Some(screencopy_frame) = &state.screencopy_frame else {
-                    error!("No WlScreencopyFrameV1 loaded");
-                    return;
-                };
                 let Some(surface) = &state.surface else {
                     error!("No WlSurface loaded");
                     return;
@@ -520,7 +500,7 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for AppData {
                 surface.commit();
 
                 // clean up screencopy_frame & pool
-                screencopy_frame.destroy();
+                proxy.destroy();
                 pool.destroy();
             }
             zwlr_screencopy_frame_v1::Event::Failed => {
