@@ -644,15 +644,16 @@ impl ScreenFreezer {
             };
 
             // create a layer surface & store it for later
-            self.state.layer_surface = Some(zwlr_layer_shell_v1::ZwlrLayerShellV1::get_layer_surface(
-                layer_shell,
-                &surface,
-                Some(&output),
-                Layer::Overlay,
-                "wayfreeze".to_string(),
-                &self.queue_handle,
-                (),
-            ));
+            self.state.layer_surface =
+                Some(zwlr_layer_shell_v1::ZwlrLayerShellV1::get_layer_surface(
+                    layer_shell,
+                    &surface,
+                    Some(&output),
+                    Layer::Overlay,
+                    "wayfreeze".to_string(),
+                    &self.queue_handle,
+                    (),
+                ));
 
             // instantiates an interface extension for the wl_surface to crop & scale its content
             self.state.viewport = Some(viewporter.get_viewport(&surface, &self.queue_handle, ()));
@@ -661,7 +662,6 @@ impl ScreenFreezer {
             fs_manager.get_fractional_scale(&surface, &self.queue_handle, ());
             // wait for the PreferredScale event
             self.event_queue.blocking_dispatch(&mut self.state).unwrap();
-            
         }
         
         let Some(surface) = &self.state.surface else {
