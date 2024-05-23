@@ -383,11 +383,6 @@ impl Dispatch<wl_shm::WlShm, ()> for AppData {
         _connection: &wayland_client::Connection,
         _queue_handle: &wayland_client::QueueHandle<Self>,
     ) {
-        // if let wl_shm::Event::Format {format} = event {
-        //     debug!("| Received wl_shm::Event::Format");
-        //     // informs client about a valid pixel format that can be used for buffers
-        //     state.format = Some(format.into_result().expect("Unexpected format"));
-        // };
     }
 }
 
@@ -564,7 +559,6 @@ impl Dispatch<ZwlrScreencopyFrameV1, i64> for AppData {
                 // attach buffer to surface
                 surfaces[data].attach(Some(&buffers[data]), 0, 0);
                 surfaces[data].set_buffer_scale(1);
-                //surface.damage(0, 0, width, height);
                 surfaces[data].commit();
 
                 // clean up screencopy_frame & pool
