@@ -731,7 +731,7 @@ impl ScreenFreezer {
                 );
 
                 let Some(viewporter) = &self.state.viewporter else {
-                    error!("No WpViewPorterV1 loaded");
+                    error!("No WpViewPorter loaded");
                     return Ok(());
                 };
                 let Some((fs_manager, _)) = &self.state.fs_manager else {
