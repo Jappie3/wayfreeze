@@ -1,7 +1,9 @@
 use clap::Parser;
 use env_logger;
 use log::{debug, error, info, warn};
+use std::collections::HashMap;
 use std::error::Error;
+use std::hash::Hash;
 use std::os::unix::io::AsFd;
 use tempfile::tempfile;
 use wayland_client::{
@@ -30,30 +32,49 @@ use wayland_protocols_wlr::{
 };
 use xkbcommon::xkb;
 
+fn vec_insert<T, V>(state_hm: &mut Option<HashMap<T, V>>, key: T, value: V)
+where
+    T: Eq + Hash,
+    V: Clone,
+{
+    match state_hm {
+        Some(hm) => {
+            hm.insert(key, value.clone());
+        }
+        None => {
+            let mut new_hm = HashMap::new();
+            new_hm.insert(key, value.clone());
+            *state_hm = Some(new_hm);
+        }
+    }
+}
+
 #[derive(Default)]
 struct AppData {
     compositor: Option<(wl_compositor::WlCompositor, u32)>,
-    surface: Option<wl_surface::WlSurface>,
-    output: Option<wl_output::WlOutput>,
+    // store all outputs in a vector
+    outputs: Option<Vec<wl_output::WlOutput>>,
+    // key is the position of the corresponding output in the above vector
+    surfaces: Option<HashMap<i64, wl_surface::WlSurface>>,
+    widths: Option<HashMap<i64, i32>>,
+    heights: Option<HashMap<i64, i32>>,
+    scales: Option<HashMap<i64, i32>>,
+    viewports: Option<HashMap<i64, WpViewport>>,
+    shm_pools: Option<HashMap<i64, wl_shm_pool::WlShmPool>>,
+    buffers: Option<HashMap<i64, wl_buffer::WlBuffer>>,
+    layer_surfaces: Option<HashMap<i64, zwlr_layer_surface_v1::ZwlrLayerSurfaceV1>>,
+    screencopy_frames: Option<HashMap<i64, ZwlrScreencopyFrameV1>>,
     seat: Option<wl_seat::WlSeat>,
     pointer: Option<wl_pointer::WlPointer>,
     keyboard: Option<wl_keyboard::WlKeyboard>,
     context: Option<xkb::Context>,
     keymap: Option<xkb::Keymap>,
     kbstate: Option<xkb::State>,
-    width: i32,
-    height: i32,
-    scale: u32,
-    shm: Option<wl_shm::WlShm>,
-    buffer: Option<wl_buffer::WlBuffer>,
-    pool: Option<wl_shm_pool::WlShmPool>,
     fs_manager: Option<(WpFractionalScaleManagerV1, u32)>,
     viewporter: Option<WpViewporter>,
-    viewport: Option<WpViewport>,
+    shm: Option<wl_shm::WlShm>,
     screencopy_manager: Option<(ZwlrScreencopyManagerV1, u32)>,
-    screencopy_frame: Option<ZwlrScreencopyFrameV1>,
     layer_shell: Option<(zwlr_layer_shell_v1::ZwlrLayerShellV1, u32)>,
-    layer_surface: Option<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1>,
     hide_cursor: bool,
     exit: bool,
 }
@@ -79,16 +100,23 @@ impl Dispatch<wl_registry::WlRegistry, ()> for AppData {
                 {
                     // wl_compositor
                     info!("> Bound: {interface} v{version}");
-                    let compositor: wl_compositor::WlCompositor =
-                        proxy.bind(name, version, queue_handle, ());
-                    state.surface = Some(compositor.create_surface(&queue_handle, ()));
-                    state.compositor = Some((compositor, name));
-                } else if interface == wl_output::WlOutput::interface().name
-                    && state.output.is_none()
-                {
+                    state.compositor = Some((proxy.bind(name, version, queue_handle, ()), name));
+                } else if interface == wl_output::WlOutput::interface().name {
                     // wl_output
                     info!("> Bound: {interface} v{version}");
-                    state.output = Some(proxy.bind(name, version, queue_handle, ()));
+                    // TODO consider doing this in the Dispatch for wl_output after the Done event
+                    match &mut state.outputs {
+                        Some(vec) => {
+                            // this is not the first monitor
+                            vec.push(proxy.bind(name, version, queue_handle, vec.len()))
+                        }
+                        None => {
+                            // vec doesn't exist -> first monitor, index is 0
+                            let mut new_vec = Vec::new();
+                            new_vec.push(proxy.bind(name, version, queue_handle, 0));
+                            state.outputs = Some(new_vec);
+                        }
+                    }
                 } else if interface == wl_seat::WlSeat::interface().name && state.seat.is_none() {
                     // wl_seat
                     info!("> Bound: {interface} v{version}");
@@ -131,7 +159,6 @@ impl Dispatch<wl_registry::WlRegistry, ()> for AppData {
                     if name == *compositor_name {
                         warn!("Compositor was removed");
                         state.compositor = None;
-                        state.surface = None;
                     }
                 } else if let Some((_, screencopymanager_name)) = &state.screencopy_manager {
                     if name == *screencopymanager_name {
@@ -150,14 +177,14 @@ impl Dispatch<wl_registry::WlRegistry, ()> for AppData {
     }
 }
 
-impl Dispatch<wl_output::WlOutput, ()> for AppData {
+impl Dispatch<wl_output::WlOutput, usize> for AppData {
     fn event(
         state: &mut Self,
         _proxy: &wl_output::WlOutput,
         event: <wl_output::WlOutput as Proxy>::Event,
-        _data: &(),
+        data: &usize,
         _connection: &wayland_client::Connection,
-        _queue_handle: &wayland_client::QueueHandle<Self>,
+        queue_handle: &wayland_client::QueueHandle<Self>,
     ) {
         if let wl_output::Event::Mode {
             flags: _,
@@ -168,8 +195,21 @@ impl Dispatch<wl_output::WlOutput, ()> for AppData {
         {
             debug!("| Received wl_output::Event::Mode");
             // describes an available output mode for the output
-            state.width = width;
-            state.height = height;
+
+            // save the width & height of this output under the same key as this output's index in the vector
+            vec_insert(&mut state.widths, *data as i64, width);
+            vec_insert(&mut state.heights, *data as i64, height);
+
+            // create a surface for this output & store it
+            let Some((compositor, _)) = &state.compositor else {
+                error!("No WlCompositor loaded");
+                return;
+            };
+            vec_insert(
+                &mut state.surfaces,
+                *data as i64,
+                compositor.create_surface(&queue_handle, ()),
+            );
         };
     }
 }
@@ -361,12 +401,12 @@ impl Dispatch<zwlr_layer_shell_v1::ZwlrLayerShellV1, ()> for AppData {
     }
 }
 
-impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for AppData {
+impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, i64> for AppData {
     fn event(
         state: &mut Self,
         proxy: &zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
         event: <zwlr_layer_surface_v1::ZwlrLayerSurfaceV1 as Proxy>::Event,
-        _data: &(),
+        data: &i64,
         _connection: &wayland_client::Connection,
         queue_handle: &wayland_client::QueueHandle<Self>,
     ) {
@@ -380,22 +420,30 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for AppData {
                 // acknowledge the Configure event
                 proxy.ack_configure(serial);
 
-                let Some(output) = &state.output else {
-                    error!("No WlOutput loaded");
+                let Some(outputs) = &state.outputs else {
+                    error!("No WlOutputs loaded");
+                    return;
+                };
+                let Some((screencopy_manager, _)) = &state.screencopy_manager else {
+                    error!("No ZwlrScreencopyManagerV1 loaded");
                     return;
                 };
                 let Some(shm) = &state.shm else {
                     error!("No WlShm loaded");
                     return;
                 };
-                let Some((screencopy_manager, _)) = &state.screencopy_manager else {
-                    error!("No ZwlrScreencopyFrameV1 loaded");
+                let Some(widths) = &state.widths else {
+                    error!("Could not load widths");
+                    return;
+                };
+                let Some(heights) = &state.heights else {
+                    error!("Could not load heights");
                     return;
                 };
 
                 // create pool
                 let tmp = tempfile().ok().expect("Unable to create tempfile");
-                let pool_size = state.height * state.width * 4; // height * width * 4 -> total size of the pool
+                let pool_size = heights[data] * widths[data] * 4; // height * width * 4 -> total size of the pool
                 tmp.set_len(pool_size as u64).unwrap();
                 let pool: wl_shm_pool::WlShmPool =
                     wl_shm::WlShm::create_pool(&shm, tmp.as_fd(), pool_size, &queue_handle, ());
@@ -403,12 +451,12 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for AppData {
                 // create screencopyframe from output
                 let screencopy_frame = screencopy_manager.capture_output(
                     !state.hide_cursor as i32,
-                    &output,
+                    &outputs[*data as usize],
                     &queue_handle,
-                    (),
+                    *data,
                 );
-                state.screencopy_frame = Some(screencopy_frame);
-                state.pool = Some(pool);
+                vec_insert(&mut state.screencopy_frames, *data, screencopy_frame);
+                vec_insert(&mut state.shm_pools, *data, pool);
             }
             zwlr_layer_surface_v1::Event::Closed => {
                 proxy.destroy();
@@ -431,12 +479,12 @@ impl Dispatch<ZwlrScreencopyManagerV1, ()> for AppData {
     }
 }
 
-impl Dispatch<ZwlrScreencopyFrameV1, ()> for AppData {
+impl Dispatch<ZwlrScreencopyFrameV1, i64> for AppData {
     fn event(
         state: &mut Self,
         proxy: &ZwlrScreencopyFrameV1,
         event: <ZwlrScreencopyFrameV1 as Proxy>::Event,
-        _data: &(),
+        data: &i64,
         _connection: &wayland_client::Connection,
         queue_handle: &wayland_client::QueueHandle<Self>,
     ) {
@@ -450,13 +498,13 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for AppData {
                 debug!("| Received zwlr_screencopy_frame_v1::Event::Buffer");
                 // provides information about wl_shm buffer parameters that need to be used for this frame
                 // sent once after the frame is created if wl_shm buffers are supported
-                let Some(pool) = &state.pool else {
-                    error!("No WlShmPool loaded");
+                let Some(pools) = &state.shm_pools else {
+                    error!("Could not load WlShmPools");
                     return;
                 };
 
                 // catch reported buffer type & create buffer
-                let buffer: wl_buffer::WlBuffer = pool.create_buffer(
+                let buffer: wl_buffer::WlBuffer = pools[data].create_buffer(
                     0, // buffer can take up the whole pool -> offset 0
                     width as i32,
                     height as i32,
@@ -465,43 +513,44 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for AppData {
                     &queue_handle,
                     (),
                 );
-                state.buffer = Some(buffer);
+                vec_insert(&mut state.buffers, *data, buffer);
             }
             zwlr_screencopy_frame_v1::Event::BufferDone { .. } => {
                 debug!("| Received zwlr_screencopy_frame_v1::Event::BufferDone");
                 // all buffer types are reported, proceed to send copy request
                 // after copy -> wait for Event::Ready
-                let Some(buffer) = &state.buffer else {
-                    error!("No WlBuffer loaded");
+                let Some(buffer) = &state.buffers else {
+                    error!("Could not load WlBuffers");
                     return;
                 };
                 // copy frame to buffer, sends Ready when successful
-                proxy.copy(&buffer);
+                proxy.copy(&buffer[data]);
             }
             zwlr_screencopy_frame_v1::Event::Ready { .. } => {
                 debug!("| Received zwlr_screencopy_frame_v1::Event::Ready");
                 // copy done, frame is available for reading
-                let Some(surface) = &state.surface else {
-                    error!("No WlSurface loaded");
+                let Some(surfaces) = &state.surfaces else {
+                    error!("Could not load WlSurfaces");
                     return;
                 };
-                let Some(pool) = &state.pool else {
-                    error!("No WlShmPool loaded");
+                let Some(pools) = &state.shm_pools else {
+                    error!("Could not load WlShmPools");
                     return;
                 };
-                let Some(buffer) = &state.buffer else {
-                    error!("No WlBuffer loaded");
+                let Some(buffers) = &state.buffers else {
+                    error!("Could not load WlBuffers");
                     return;
                 };
+
                 // attach buffer to surface
-                surface.attach(Some(&buffer), 0, 0);
-                surface.set_buffer_scale(1);
+                surfaces[data].attach(Some(&buffers[data]), 0, 0);
+                surfaces[data].set_buffer_scale(1);
                 //surface.damage(0, 0, width, height);
-                surface.commit();
+                surfaces[data].commit();
 
                 // clean up screencopy_frame & pool
                 proxy.destroy();
-                pool.destroy();
+                pools[data].destroy();
             }
             zwlr_screencopy_frame_v1::Event::Failed => {
                 debug!("| Received zwlr_screencopy_frame_v1::Event::Failed");
@@ -526,42 +575,50 @@ impl Dispatch<WpFractionalScaleManagerV1, ()> for AppData {
     }
 }
 
-impl Dispatch<WpFractionalScaleV1, ()> for AppData {
+impl Dispatch<WpFractionalScaleV1, i64> for AppData {
     fn event(
         state: &mut Self,
         _proxy: &WpFractionalScaleV1,
         event: <WpFractionalScaleV1 as Proxy>::Event,
-        _data: &(),
+        data: &i64,
         _connection: &wayland_client::Connection,
         _queue_handle: &wayland_client::QueueHandle<Self>,
     ) {
         match event {
-            wp_fractional_scale_v1::Event::PreferredScale { scale, .. } => {
+            wp_fractional_scale_v1::Event::PreferredScale { scale } => {
                 // notifies of a new preferred scale for this surface
                 debug!("| Received wp_fractional_scale_v1::Event::PreferredScale");
-                state.scale = scale;
 
-                let Some(layer_surface) = &state.layer_surface else {
+                let Some(layer_surfaces) = &state.layer_surfaces else {
                     error!("No ZwlrLayerSurfaceV1 loaded");
                     return;
                 };
-                let Some(viewport) = &state.viewport else {
+                let Some(viewports) = &state.viewports else {
                     error!("No WpViewPortV1 loaded");
+                    return;
+                };
+                let Some(widths) = &state.widths else {
+                    error!("Could not load widths");
+                    return;
+                };
+                let Some(heights) = &state.heights else {
+                    error!("Could not load heights");
                     return;
                 };
 
                 // set source & destination rectangle
-                viewport.set_source(0.0, 0.0, state.width as f64, state.height as f64);
-                viewport.set_destination(
-                    (state.width as f64 / (state.scale as f64 / 120.0)) as i32,
-                    (state.height as f64 / (state.scale as f64 / 120.0)) as i32,
+                viewports[data].set_source(0.0, 0.0, widths[data] as f64, heights[data] as f64);
+                viewports[data].set_destination(
+                    (widths[data] as f64 / (scale as f64 / 120.0)) as i32,
+                    (heights[data] as f64 / (scale as f64 / 120.0)) as i32,
+                );
+                // update layer surface size every time the preferred scale changes
+                layer_surfaces[data].set_size(
+                    (widths[data] as f64 / (scale as f64 / 120.0)) as u32,
+                    (heights[data] as f64 / (scale as f64 / 120.0)) as u32,
                 );
 
-                // update layer surface size every time the preferred scale changes
-                layer_surface.set_size(
-                    (state.width as f64 / (state.scale as f64 / 120.0)) as u32,
-                    (state.height as f64 / (state.scale as f64 / 120.0)) as u32,
-                );
+                vec_insert(&mut state.scales, *data, scale as i32)
             }
             _ => {}
         }
@@ -611,6 +668,7 @@ impl ScreenFreezer {
         state.hide_cursor = hide_cursor;
 
         event_queue.roundtrip(&mut state).unwrap();
+        info!("> Received all globals");
 
         state.context = Some(xkb::Context::new(xkb::CONTEXT_NO_FLAGS));
 
@@ -621,72 +679,115 @@ impl ScreenFreezer {
         })
     }
     pub fn freeze(&mut self) -> Result<(), Box<dyn Error>> {
-        {
-            let Some(output) = &self.state.output else {
-                error!("No WlOutput loaded");
-                return Ok(());
-            };
-            let Some(surface) = &self.state.surface else {
-                error!("No WlSurface loaded");
-                return Ok(());
-            };
-            let Some(viewporter) = &self.state.viewporter else {
-                error!("No WpViewPorterV1 loaded");
-                return Ok(());
-            };
-            let Some((fs_manager, _)) = &self.state.fs_manager else {
-                error!("No WpFractionalScaleManagerV1 loaded");
-                return Ok(());
-            };
-            let Some((layer_shell, _)) = &self.state.layer_shell else {
-                error!("No ZwlrLayerShellV1 loaded");
-                return Ok(());
-            };
-
-            // create a layer surface & store it for later
-            self.state.layer_surface =
-                Some(zwlr_layer_shell_v1::ZwlrLayerShellV1::get_layer_surface(
-                    layer_shell,
-                    &surface,
-                    Some(&output),
-                    Layer::Overlay,
-                    "wayfreeze".to_string(),
-                    &self.queue_handle,
-                    (),
-                ));
-
-            // instantiates an interface extension for the wl_surface to crop & scale its content
-            self.state.viewport = Some(viewporter.get_viewport(&surface, &self.queue_handle, ()));
-
-            // create add-on object for the surface so that compositor can request fractional scales, will send preferred_scale event
-            fs_manager.get_fractional_scale(&surface, &self.queue_handle, ());
-            // wait for the PreferredScale event
-            self.event_queue.blocking_dispatch(&mut self.state).unwrap();
+        // check self.state.outputs
+        match &self.state.outputs {
+            // if the vector exists -> we're good, at least 1 output was found & bound to
+            Some(vec) => {
+                info!("> Bound to {} input(s)", vec.len())
+            }
+            None => {
+                // no vector -> no outputs found
+                error!("No outputs found - exiting...");
+                self.state.exit = true;
+            }
         }
-        
-        let Some(surface) = &self.state.surface else {
-            error!("No WlSurface loaded");
-            return Ok(());
-        };
-        let Some(layer_surface) = &self.state.layer_surface else {
-            error!("No ZwlrLayerSurfaceV1 loaded");
+
+        self.event_queue.blocking_dispatch(&mut self.state).unwrap();
+
+        let Some(outputs) = &self.state.outputs else {
             return Ok(());
         };
 
-        // commit viewport set_source & set_destination in response to PreferredScale event
-        surface.commit();
+        for i in 0..outputs.len() {
+            {
+                let i = i as i64;
 
-        // scale will always be 1 here, later PreferredScale event can update it
-        layer_surface.set_size(
-            (self.state.width as f64 / (self.state.scale as f64 / 120.0)) as u32,
-            (self.state.height as f64 / (self.state.scale as f64 / 120.0)) as u32,
-        );
-        layer_surface.set_anchor(Anchor::Top | Anchor::Right | Anchor::Bottom | Anchor::Left);
-        layer_surface.set_exclusive_zone(-1); // extend surface to anchored edges
-        layer_surface.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
-        surface.commit(); // commit before attaching any buffers
+                let Some(surfaces) = &self.state.surfaces else {
+                    error!("No WlSurface loaded");
+                    return Ok(());
+                };
 
-        info!("Screen frozen");
+                let Some((layer_shell, _)) = &self.state.layer_shell else {
+                    error!("No ZwlrLayerShellV1 loaded");
+                    return Ok(());
+                };
+                let Some(outputs) = &self.state.outputs else {
+                    return Ok(());
+                };
+                let output = &outputs[i as usize];
+
+                // create a layer surface for the current output & its surface
+                vec_insert(
+                    &mut self.state.layer_surfaces,
+                    i,
+                    zwlr_layer_shell_v1::ZwlrLayerShellV1::get_layer_surface(
+                        layer_shell,
+                        &surfaces[&i],
+                        Some(&output),
+                        Layer::Overlay,
+                        "wayfreeze".to_string(),
+                        &self.queue_handle,
+                        i,
+                    ),
+                );
+
+                let Some(viewporter) = &self.state.viewporter else {
+                    error!("No WpViewPorterV1 loaded");
+                    return Ok(());
+                };
+                let Some((fs_manager, _)) = &self.state.fs_manager else {
+                    error!("No WpFractionalScaleManagerV1 loaded");
+                    return Ok(());
+                };
+
+                // instantiates an interface extension for the wl_surface to crop & scale its content
+                vec_insert(
+                    &mut self.state.viewports,
+                    i,
+                    viewporter.get_viewport(&surfaces[&i], &self.queue_handle, ()),
+                );
+                // create add-on object for the surface so that compositor can request fractional scales, will send preferred_scale event
+                fs_manager.get_fractional_scale(&surfaces[&i], &self.queue_handle, i);
+
+                // wait for the PreferredScale event
+                self.event_queue.blocking_dispatch(&mut self.state).unwrap();
+
+                let Some(layer_surfaces) = &self.state.layer_surfaces else {
+                    error!("No ZwlrLayerSurfaceV1 loaded");
+                    return Ok(());
+                };
+                let Some(widths) = &self.state.widths else {
+                    error!("Could not load widths");
+                    return Ok(());
+                };
+                let Some(heights) = &self.state.heights else {
+                    error!("Could not load heights");
+                    return Ok(());
+                };
+                let Some(scales) = &self.state.scales else {
+                    error!("Could not load scales");
+                    return Ok(());
+                };
+
+                // scale will always be 1 here, later PreferredScale event can update it
+                layer_surfaces[&i].set_size(
+                    (widths[&i] as f64 / (scales[&i] as f64 / 120.0)) as u32,
+                    (heights[&i] as f64 / (scales[&i] as f64 / 120.0)) as u32,
+                );
+                layer_surfaces[&i]
+                    .set_anchor(Anchor::Top | Anchor::Right | Anchor::Bottom | Anchor::Left);
+                layer_surfaces[&i].set_exclusive_zone(-1); // extend surface to anchored edges
+                layer_surfaces[&i].set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
+
+                let Some(surfaces) = &self.state.surfaces else {
+                    error!("No WlSurface loaded");
+                    return Ok(());
+                };
+                surfaces[&i].commit(); // commit before attaching any buffers
+            }
+        }
+
+        info!("> Screen frozen");
 
         loop {
             self.event_queue.blocking_dispatch(&mut self.state).unwrap();
