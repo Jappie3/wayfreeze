@@ -566,6 +566,7 @@ impl Dispatch<ZwlrScreencopyFrameV1, i64> for AppData {
                 surfaces[data].attach(Some(&buffers[data]), 0, 0);
                 surfaces[data].set_buffer_scale(1);
                 surfaces[data].commit();
+                info!("> Screen frozen");
 
                 // clean up screencopy_frame & pool
                 proxy.destroy();
@@ -810,8 +811,6 @@ impl ScreenFreezer {
                 surfaces[&i].commit(); // commit before attaching any buffers
             }
         }
-
-        info!("> Screen frozen");
 
         loop {
             self.event_queue.blocking_dispatch(&mut self.state).unwrap();
