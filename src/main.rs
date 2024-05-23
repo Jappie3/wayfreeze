@@ -104,7 +104,6 @@ impl Dispatch<wl_registry::WlRegistry, ()> for AppData {
                 } else if interface == wl_output::WlOutput::interface().name {
                     // wl_output
                     info!("> Bound: {interface} v{version}");
-                    // TODO consider doing this in the Dispatch for wl_output after the Done event
                     match &mut state.outputs {
                         Some(vec) => {
                             // this is not the first monitor
