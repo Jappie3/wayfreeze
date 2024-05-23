@@ -574,7 +574,7 @@ impl Dispatch<ZwlrScreencopyFrameV1, i64> for AppData {
             zwlr_screencopy_frame_v1::Event::Failed => {
                 debug!("| Received zwlr_screencopy_frame_v1::Event::Failed");
                 error!("Failed to get a screencopyframe");
-                // TODO exit here
+                state.exit = true;
             }
             _ => (),
         }
