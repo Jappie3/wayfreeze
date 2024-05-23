@@ -374,7 +374,7 @@ impl Dispatch<wl_shm::WlShm, ()> for AppData {
 
 impl Dispatch<wl_buffer::WlBuffer, ()> for AppData {
     fn event(
-        state: &mut Self,
+        _state: &mut Self,
         proxy: &wl_buffer::WlBuffer,
         event: <wl_buffer::WlBuffer as Proxy>::Event,
         _data: &(),
