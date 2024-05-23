@@ -1,6 +1,6 @@
 # Wayfreeze
 
-A small CLI tool to freeze the screen of a wlroots compositor, this can be useful to, for example, take a screenshot.
+A small CLI tool to freeze the screen of a wlroots compositor, this can be useful to, for example, take a screenshot. Supports multiple monitors & fractional scaling.
 
 ## Usage
 
@@ -15,7 +15,7 @@ Options:
   -V, --version      Print version
 ```
 
-Example usage with Grim & Slurp:
+Example usage with [Grim](https://git.sr.ht/~emersion/grim) & [Slurp](https://github.com/emersion/slurp):
 
 ```bash
 wayfreeze & PID=$!; sleep .1; grim -g "$(slurp)" - | wl-copy; kill $PID
@@ -34,6 +34,15 @@ Install the package:
 ```nix
 environment.systemPackages = [inputs.wayfreeze.packages.${pkgs.system}.wayfreeze];
 ```
+
+## Technical
+
+The following protocols should be supported by your compositor:
+
+- `wlr-layer-shell-unstable-v1` -> used for creating & rendering a layer surface
+- `wlr-screencopy-unstable-v1` -> used for copying the current output to a client buffer
+- `wp-fractional-scale-v1` -> to support fractional scaling
+- `wp-viewporter` -> for scaling the surface
 
 ## Credits
 
