@@ -1,5 +1,5 @@
 {
-  description = "Tool to freeze the screen of a wlroots compositor";
+  description = "Tool to freeze the screen of a Wayland compositor";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
