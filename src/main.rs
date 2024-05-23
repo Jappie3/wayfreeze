@@ -257,7 +257,7 @@ impl Dispatch<wl_pointer::WlPointer, ()> for AppData {
                 if button_state != wayland_client::WEnum::Value(wl_pointer::ButtonState::Released) {
                     return;
                 }
-                info!("Mouse button released - exiting...");
+                info!("> Mouse button released - exiting...");
                 state.exit = true;
             }
             _ => {}
@@ -312,7 +312,7 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for AppData {
                 if key_state != wayland_client::WEnum::Value(wl_keyboard::KeyState::Pressed) {
                     return;
                 }
-                debug!("Key pressed: {}", key);
+                debug!("| Key pressed: {}", key);
                 let Some(kbstate) = &state.kbstate else {
                     error!("No xkb State loaded");
                     return;
@@ -320,7 +320,7 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for AppData {
                 if xkb::State::key_get_one_sym(kbstate, xkb::Keycode::new(key + 8))
                     == xkb::Keysym::Escape
                 {
-                    info!("Escape pressed - exiting...");
+                    info!("> Escape pressed - exiting...");
                     state.exit = true;
                 };
             }
