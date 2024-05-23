@@ -1,6 +1,6 @@
 use clap::Parser;
 use env_logger;
-use log::{debug, error, info, warn};
+use log::{debug, error, info, trace, warn};
 use std::collections::HashMap;
 use std::error::Error;
 use std::hash::Hash;
@@ -212,7 +212,8 @@ impl Dispatch<wl_output::WlOutput, usize> for AppData {
             refresh: _,
         } = event
         {
-            debug!("| Received wl_output::Event::Mode");
+            debug!("| Received wl_output::Event::Mode for output {}", data);
+            trace!("  this is output number {}", state.outputs.as_ref().map(|v| v.len()).unwrap_or(0));
             // describes an available output mode for the output
 
             // save the width & height of this output under the same key as this output's index in the vector
@@ -430,12 +431,12 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, i64> for AppData {
                 width: _,
                 height: _,
             } => {
-                debug!("| Received zwlr_layer_surface_v1::Event::Configure");
+                debug!("| Received zwlr_layer_surface_v1::Event::Configure for output {}", data);
                 // acknowledge the Configure event
                 proxy.ack_configure(serial);
 
                 let Some(outputs) = &state.outputs else {
-                    error!("No WlOutputs loaded");
+                    error!("Could not load WlOutputs");
                     return;
                 };
                 let Some((screencopy_manager, _)) = &state.screencopy_manager else {
@@ -462,6 +463,7 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, i64> for AppData {
                 let pool: wl_shm_pool::WlShmPool =
                     wl_shm::WlShm::create_pool(&shm, tmp.as_fd(), pool_size, &queue_handle, ());
 
+                trace!("  capturing output {}", data);
                 // create screencopyframe from output
                 let screencopy_frame = screencopy_manager.capture_output(
                     !state.hide_cursor as i32,
@@ -473,6 +475,7 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, i64> for AppData {
                 vec_insert(&mut state.shm_pools, *data, pool);
             }
             zwlr_layer_surface_v1::Event::Closed => {
+                debug!("| Received zwlr_layer_surface_v1::Event::Closed for output {}", data);
                 proxy.destroy();
             }
             _ => (),
@@ -509,7 +512,7 @@ impl Dispatch<ZwlrScreencopyFrameV1, i64> for AppData {
                 height,
                 stride,
             } => {
-                debug!("| Received zwlr_screencopy_frame_v1::Event::Buffer");
+                debug!("| Received zwlr_screencopy_frame_v1::Event::Buffer for output {}", data);
                 // provides information about wl_shm buffer parameters that need to be used for this frame
                 // sent once after the frame is created if wl_shm buffers are supported
                 let Some(pools) = &state.shm_pools else {
@@ -517,6 +520,7 @@ impl Dispatch<ZwlrScreencopyFrameV1, i64> for AppData {
                     return;
                 };
 
+                trace!("  creating buffer, width: {}, height: {}, stride: {}, format: {:?}", width, height, stride, format);
                 // catch reported buffer type & create buffer
                 let buffer: wl_buffer::WlBuffer = pools[data].create_buffer(
                     0, // buffer can take up the whole pool -> offset 0
@@ -530,18 +534,19 @@ impl Dispatch<ZwlrScreencopyFrameV1, i64> for AppData {
                 vec_insert(&mut state.buffers, *data, buffer);
             }
             zwlr_screencopy_frame_v1::Event::BufferDone { .. } => {
-                debug!("| Received zwlr_screencopy_frame_v1::Event::BufferDone");
+                debug!("| Received zwlr_screencopy_frame_v1::Event::BufferDone for output {}", data);
                 // all buffer types are reported, proceed to send copy request
                 // after copy -> wait for Event::Ready
                 let Some(buffer) = &state.buffers else {
                     error!("Could not load WlBuffers");
                     return;
                 };
+                trace!("  copying frame to buffer");
                 // copy frame to buffer, sends Ready when successful
                 proxy.copy(&buffer[data]);
             }
             zwlr_screencopy_frame_v1::Event::Ready { .. } => {
-                debug!("| Received zwlr_screencopy_frame_v1::Event::Ready");
+                debug!("| Received zwlr_screencopy_frame_v1::Event::Ready for output {}", data);
                 // copy done, frame is available for reading
                 let Some(surfaces) = &state.surfaces else {
                     error!("Could not load WlSurfaces");
@@ -556,6 +561,7 @@ impl Dispatch<ZwlrScreencopyFrameV1, i64> for AppData {
                     return;
                 };
 
+                trace!("  attaching buffer to surface & committing");
                 // attach buffer to surface
                 surfaces[data].attach(Some(&buffers[data]), 0, 0);
                 surfaces[data].set_buffer_scale(1);
@@ -566,8 +572,8 @@ impl Dispatch<ZwlrScreencopyFrameV1, i64> for AppData {
                 pools[data].destroy();
             }
             zwlr_screencopy_frame_v1::Event::Failed => {
-                debug!("| Received zwlr_screencopy_frame_v1::Event::Failed");
-                error!("Failed to get a screencopyframe");
+                debug!("| Received zwlr_screencopy_frame_v1::Event::Failed for output {}", data);
+                error!("Failed to get a screencopyframe (output {})", data);
                 state.exit = true;
             }
             _ => (),
@@ -600,14 +606,14 @@ impl Dispatch<WpFractionalScaleV1, i64> for AppData {
         match event {
             wp_fractional_scale_v1::Event::PreferredScale { scale } => {
                 // notifies of a new preferred scale for this surface
-                debug!("| Received wp_fractional_scale_v1::Event::PreferredScale");
+                debug!("| Received wp_fractional_scale_v1::Event::PreferredScale for output {}", data);
 
                 let Some(layer_surfaces) = &state.layer_surfaces else {
                     error!("No ZwlrLayerSurfaceV1 loaded");
                     return;
                 };
                 let Some(viewports) = &state.viewports else {
-                    error!("No WpViewPortV1 loaded");
+                    error!("Could not load WpViewPortV1s");
                     return;
                 };
                 let Some(widths) = &state.widths else {
@@ -618,6 +624,8 @@ impl Dispatch<WpFractionalScaleV1, i64> for AppData {
                     error!("Could not load heights");
                     return;
                 };
+
+                trace!("  setting scale to {}/120 = {}, width: {} height: {}", scale, scale as f64/120.0, widths[data], heights[data]);
 
                 // set source & destination rectangle
                 viewports[data].set_source(0.0, 0.0, widths[data] as f64, heights[data] as f64);
@@ -714,6 +722,7 @@ impl ScreenFreezer {
         for i in 0..outputs.len() {
             {
                 let i = i as i64;
+                trace!("  processing output {}", i);
 
                 let Some(surfaces) = &self.state.surfaces else {
                     error!("No WlSurface loaded");
@@ -729,6 +738,7 @@ impl ScreenFreezer {
                 };
                 let output = &outputs[i as usize];
 
+                trace!("  creating layer surface {}", i);
                 // create a layer surface for the current output & its surface
                 vec_insert(
                     &mut self.state.layer_surfaces,
@@ -796,6 +806,7 @@ impl ScreenFreezer {
                     error!("No WlSurface loaded");
                     return Ok(());
                 };
+                trace!("  committing to surface {} before attaching buffers", i);
                 surfaces[&i].commit(); // commit before attaching any buffers
             }
         }
@@ -822,7 +833,7 @@ struct Args {
 fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
     let args = Args::parse();
-    info!(target: "main", "Parsed arguments");
+    info!("> Parsed arguments");
 
     match ScreenFreezer::new(args.hide_cursor) {
         Ok(mut sf) => sf.freeze().unwrap(),
