@@ -64,15 +64,15 @@ struct AppData {
     buffers: Option<HashMap<i64, wl_buffer::WlBuffer>>,
     layer_surfaces: Option<HashMap<i64, zwlr_layer_surface_v1::ZwlrLayerSurfaceV1>>,
     screencopy_frames: Option<HashMap<i64, ZwlrScreencopyFrameV1>>,
-    seat: Option<wl_seat::WlSeat>,
+    seat: Option<(wl_seat::WlSeat, u32)>,
     pointer: Option<wl_pointer::WlPointer>,
     keyboard: Option<wl_keyboard::WlKeyboard>,
     context: Option<xkb::Context>,
     keymap: Option<xkb::Keymap>,
     kbstate: Option<xkb::State>,
     fs_manager: Option<(WpFractionalScaleManagerV1, u32)>,
-    viewporter: Option<WpViewporter>,
-    shm: Option<wl_shm::WlShm>,
+    viewporter: Option<(WpViewporter, u32)>,
+    shm: Option<(wl_shm::WlShm, u32)>,
     screencopy_manager: Option<(ZwlrScreencopyManagerV1, u32)>,
     layer_shell: Option<(zwlr_layer_shell_v1::ZwlrLayerShellV1, u32)>,
     hide_cursor: bool,
@@ -122,11 +122,11 @@ impl Dispatch<wl_registry::WlRegistry, ()> for AppData {
                     let seat: wl_seat::WlSeat = proxy.bind(name, version, queue_handle, ());
                     state.pointer = Some(seat.get_pointer(queue_handle, ()));
                     state.keyboard = Some(seat.get_keyboard(queue_handle, ()));
-                    state.seat = Some(seat);
+                    state.seat = Some((seat, name));
                 } else if interface == wl_shm::WlShm::interface().name && state.shm.is_none() {
                     // wl_shm
                     info!("> Bound: {interface} v{version}");
-                    state.shm = Some(proxy.bind(name, version, queue_handle, ()));
+                    state.shm = Some((proxy.bind(name, version, queue_handle, ()), name));
                 } else if interface == WpFractionalScaleManagerV1::interface().name
                     && state.fs_manager.is_none()
                 {
@@ -136,7 +136,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for AppData {
                 } else if interface == WpViewporter::interface().name && state.viewporter.is_none()
                 {
                     // wp_viewporter
-                    state.viewporter = Some(proxy.bind(name, version, queue_handle, ()));
+                    state.viewporter = Some((proxy.bind(name, version, queue_handle, ()), name));
                 } else if interface == ZwlrScreencopyManagerV1::interface().name
                     && state.screencopy_manager.is_none()
                 {
@@ -158,6 +158,26 @@ impl Dispatch<wl_registry::WlRegistry, ()> for AppData {
                     if name == *compositor_name {
                         warn!("Compositor was removed");
                         state.compositor = None;
+                    }
+                } else if let Some((_, seat_name)) = &state.seat {
+                    if name == *seat_name {
+                        warn!("WlSeat was removed");
+                        state.seat = None;
+                    }
+                } else if let Some((_, shm_name)) = &state.shm {
+                    if name == *shm_name {
+                        warn!("WlShm was removed");
+                        state.shm = None;
+                    }
+                } else if let Some((_, fsmanager_name)) = &state.fs_manager {
+                    if name == *fsmanager_name {
+                        warn!("WpFractionalScaleManagerV1 was removed");
+                        state.fs_manager = None;
+                    }
+                } else if let Some((_, viewporter_name)) = &state.viewporter {
+                    if name == *viewporter_name {
+                        warn!("WpViewporter was removed");
+                        state.viewporter = None;
                     }
                 } else if let Some((_, screencopymanager_name)) = &state.screencopy_manager {
                     if name == *screencopymanager_name {
@@ -427,7 +447,7 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, i64> for AppData {
                     error!("No ZwlrScreencopyManagerV1 loaded");
                     return;
                 };
-                let Some(shm) = &state.shm else {
+                let Some((shm, _)) = &state.shm else {
                     error!("No WlShm loaded");
                     return;
                 };
@@ -730,7 +750,7 @@ impl ScreenFreezer {
                     ),
                 );
 
-                let Some(viewporter) = &self.state.viewporter else {
+                let Some((viewporter, _)) = &self.state.viewporter else {
                     error!("No WpViewPorter loaded");
                     return Ok(());
                 };
