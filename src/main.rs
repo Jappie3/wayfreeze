@@ -156,7 +156,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for AppData {
                 debug!("| Received wl_registry::Event::GlobalRemove");
                 if let Some((_, compositor_name)) = &state.compositor {
                     if name == *compositor_name {
-                        warn!("Compositor was removed");
+                        warn!("WlCompositor was removed");
                         state.compositor = None;
                     }
                 } else if let Some((_, seat_name)) = &state.seat {
