@@ -21,9 +21,8 @@
       default = wayfreeze;
       wayfreeze = pkgs.rustPlatform.buildRustPackage {
         name = "wayfreeze";
-        pname = "wayfreeze";
         src = ./.;
-        cargoLock.lockFile = ./Cargo.lock;
+        cargoHash = "sha256-IgiuBwXf9mIg/CKqZYUvG9/015Bw4+12Gw3F6J4Q3S8=";
         doCheck = true;
         nativeBuildInputs = [];
         buildInputs = with pkgs; [libxkbcommon];
