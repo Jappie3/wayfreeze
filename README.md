@@ -23,16 +23,23 @@ wayfreeze & PID=$!; sleep .1; grim -g "$(slurp)" - | wl-copy; kill $PID
 
 ## Installing
 
-Add the flake as an input:
+Wayfreeze can be installed either by using nixpkgs-unstable or flake.
 
+### Nixpkgs:
+Add this to your configuration and rebuild your system:
+```nix
+environment.systemPackages = [ pkgs.wayfreeze ];
+```
+
+### Flake:
+Add this repository as a flake to your inputs:
 ```nix
 wayfreeze.url = "github:jappie3/wayfreeze";
 ```
 
-Install the package:
-
+Define the package and then rebuild your system:
 ```nix
-environment.systemPackages = [inputs.wayfreeze.packages.${pkgs.system}.wayfreeze];
+environment.systemPackages = [ inputs.wayfreeze.packages.${pkgs.system}.wayfreeze ];
 ```
 
 ## Technical
