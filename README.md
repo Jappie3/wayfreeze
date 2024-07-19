@@ -42,6 +42,10 @@ Define the package and then rebuild your system:
 environment.systemPackages = [ inputs.wayfreeze.packages.${pkgs.system}.wayfreeze ];
 ```
 
+### From source:
+
+First, make sure you have Rust & Cargo installed. Then clone this repo & run `cargo build --release`, the compiled binary should be under `./target/release/wayfreeze`.
+
 ## Technical
 
 The following protocols should be supported by your compositor:
