@@ -570,6 +570,18 @@ impl Dispatch<WpFractionalScaleV1, i64> for AppData {
                 // notifies of a new preferred scale for this surface
                 debug!("| Received wp_fractional_scale_v1::Event::PreferredScale for output {}", data);
 
+                if state.scales != None {
+                    let Some(scales) = &state.scales else {
+                        error!("Could not load scales");
+                        return;
+                    };
+                    if scales[data] == scale as i32 {return};
+                }
+
+                let Some(surfaces) = &state.surfaces else {
+                    error!("No WlSurface loaded");
+                    return;
+                };
                 let Some(layer_surfaces) = &state.layer_surfaces else {
                     error!("No ZwlrLayerSurfaceV1 loaded");
                     return;
@@ -600,6 +612,7 @@ impl Dispatch<WpFractionalScaleV1, i64> for AppData {
                     (widths[data] as f64 / (scale as f64 / 120.0)) as u32,
                     (heights[data] as f64 / (scale as f64 / 120.0)) as u32,
                 );
+                surfaces[data].commit();
 
                 vec_insert(&mut state.scales, *data, scale as i32)
             }
