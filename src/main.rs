@@ -741,19 +741,28 @@ impl ScreenFreezer {
 
                 trace!("  creating layer surface {}", i);
                 // create a layer surface for the current output & its surface
+                let ls = zwlr_layer_shell_v1::ZwlrLayerShellV1::get_layer_surface(
+                    layer_shell,
+                    &surfaces[&i],
+                    Some(&output),
+                    Layer::Overlay,
+                    "wayfreeze".to_string(),
+                    &self.queue_handle,
+                    i,
+                );
+
+                // configure layer surface
+                ls.set_anchor(Anchor::Top | Anchor::Right | Anchor::Bottom | Anchor::Left);
+                ls.set_exclusive_zone(-1); // extend surface to anchored edges
+                ls.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
+
                 vec_insert(
                     &mut self.state.layer_surfaces,
                     i,
-                    zwlr_layer_shell_v1::ZwlrLayerShellV1::get_layer_surface(
-                        layer_shell,
-                        &surfaces[&i],
-                        Some(&output),
-                        Layer::Overlay,
-                        "wayfreeze".to_string(),
-                        &self.queue_handle,
-                        i,
-                    ),
+                    ls
                 );
+
+                surfaces[&i].commit();
 
                 let Some((viewporter, _)) = &self.state.viewporter else {
                     error!("No WpViewPorter loaded");
@@ -775,33 +784,6 @@ impl ScreenFreezer {
 
                 // wait for the PreferredScale event
                 self.event_queue.blocking_dispatch(&mut self.state).unwrap();
-
-                let Some(layer_surfaces) = &self.state.layer_surfaces else {
-                    error!("No ZwlrLayerSurfaceV1 loaded");
-                    return Ok(());
-                };
-                let Some(widths) = &self.state.widths else {
-                    error!("Could not load widths");
-                    return Ok(());
-                };
-                let Some(heights) = &self.state.heights else {
-                    error!("Could not load heights");
-                    return Ok(());
-                };
-                let Some(scales) = &self.state.scales else {
-                    error!("Could not load scales");
-                    return Ok(());
-                };
-
-                // scale will always be 1 here, later PreferredScale event can update it
-                layer_surfaces[&i].set_size(
-                    (widths[&i] as f64 / (scales[&i] as f64 / 120.0)) as u32,
-                    (heights[&i] as f64 / (scales[&i] as f64 / 120.0)) as u32,
-                );
-                layer_surfaces[&i]
-                    .set_anchor(Anchor::Top | Anchor::Right | Anchor::Bottom | Anchor::Left);
-                layer_surfaces[&i].set_exclusive_zone(-1); // extend surface to anchored edges
-                layer_surfaces[&i].set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
 
                 let Some(surfaces) = &self.state.surfaces else {
                     error!("No WlSurface loaded");
