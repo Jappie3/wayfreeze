@@ -418,12 +418,12 @@ impl Dispatch<zwlr_layer_shell_v1::ZwlrLayerShellV1, ()> for AppData {
 
 impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, i64> for AppData {
     fn event(
-        state: &mut Self,
+        _state: &mut Self,
         proxy: &zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
         event: <zwlr_layer_surface_v1::ZwlrLayerSurfaceV1 as Proxy>::Event,
         data: &i64,
         _connection: &wayland_client::Connection,
-        queue_handle: &wayland_client::QueueHandle<Self>,
+        _queue_handle: &wayland_client::QueueHandle<Self>,
     ) {
         match event {
             zwlr_layer_surface_v1::Event::Configure {
@@ -434,45 +434,6 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, i64> for AppData {
                 debug!("| Received zwlr_layer_surface_v1::Event::Configure for output {}", data);
                 // acknowledge the Configure event
                 proxy.ack_configure(serial);
-
-                let Some(outputs) = &state.outputs else {
-                    error!("Could not load WlOutputs");
-                    return;
-                };
-                let Some((screencopy_manager, _)) = &state.screencopy_manager else {
-                    error!("No ZwlrScreencopyManagerV1 loaded");
-                    return;
-                };
-                let Some((shm, _)) = &state.shm else {
-                    error!("No WlShm loaded");
-                    return;
-                };
-                let Some(widths) = &state.widths else {
-                    error!("Could not load widths");
-                    return;
-                };
-                let Some(heights) = &state.heights else {
-                    error!("Could not load heights");
-                    return;
-                };
-
-                // create pool
-                let tmp = tempfile().ok().expect("Unable to create tempfile");
-                let pool_size = heights[data] * widths[data] * 4; // height * width * 4 -> total size of the pool
-                tmp.set_len(pool_size as u64).unwrap();
-                let pool: wl_shm_pool::WlShmPool =
-                    wl_shm::WlShm::create_pool(&shm, tmp.as_fd(), pool_size, &queue_handle, ());
-
-                trace!("  capturing output {}", data);
-                // create screencopyframe from output
-                let screencopy_frame = screencopy_manager.capture_output(
-                    !state.hide_cursor as i32,
-                    &outputs[*data as usize],
-                    &queue_handle,
-                    *data,
-                );
-                vec_insert(&mut state.screencopy_frames, *data, screencopy_frame);
-                vec_insert(&mut state.shm_pools, *data, pool);
             }
             zwlr_layer_surface_v1::Event::Closed => {
                 debug!("| Received zwlr_layer_surface_v1::Event::Closed for output {}", data);
@@ -791,6 +752,45 @@ impl ScreenFreezer {
                 };
                 trace!("  committing to surface {} before attaching buffers", i);
                 surfaces[&i].commit(); // commit before attaching any buffers
+
+                let Some(outputs) = &self.state.outputs else {
+                    error!("Could not load WlOutputs");
+                    return Ok(());
+                };
+                let Some((screencopy_manager, _)) = &self.state.screencopy_manager else {
+                    error!("No ZwlrScreencopyManagerV1 loaded");
+                    return Ok(());
+                };
+                let Some((shm, _)) = &self.state.shm else {
+                    error!("No WlShm loaded");
+                    return Ok(());
+                };
+                let Some(widths) = &self.state.widths else {
+                    error!("Could not load widths");
+                    return Ok(());
+                };
+                let Some(heights) = &self.state.heights else {
+                    error!("Could not load heights");
+                    return Ok(());
+                };
+
+                // create pool
+                let tmp = tempfile().ok().expect("Unable to create tempfile");
+                let pool_size = heights[&i] * widths[&i] * 4; // height * width * 4 -> total size of the pool
+                tmp.set_len(pool_size as u64).unwrap();
+                let pool: wl_shm_pool::WlShmPool =
+                    wl_shm::WlShm::create_pool(&shm, tmp.as_fd(), pool_size, &self.queue_handle, ());
+
+                trace!("  capturing output {}", i);
+                // create screencopyframe from output
+                let screencopy_frame = screencopy_manager.capture_output(
+                    !self.state.hide_cursor as i32,
+                    &outputs[i as usize],
+                    &self.queue_handle,
+                    i,
+                );
+                vec_insert(&mut self.state.screencopy_frames, i, screencopy_frame);
+                vec_insert(&mut self.state.shm_pools, i, pool);
             }
         }
 
