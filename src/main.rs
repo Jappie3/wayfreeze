@@ -600,14 +600,18 @@ impl Dispatch<WpFractionalScaleV1, i64> for AppData {
                     data
                 );
 
-                if state.scales != None {
-                    let Some(scales) = &state.scales else {
-                        error!("Could not load scales");
-                        return;
-                    };
-                    if scales[data] == scale as i32 {
-                        return;
-                    };
+                if let Some(scales) = &state.scales {
+                    // check if we already have scale data for this output
+                    if *data < scales.len() as i64 {
+                        // check if the scale has changed
+                        // otherwise we'll commit again a little further down, get the event again, commit, event, etc.
+                        if scales[data] == scale as i32 {
+                            trace!("  event contained same scale as previous event: {}", scale);
+                            return;
+                        } else {
+                            trace!("  event contained new scale: {}", scale);
+                        }
+                    }
                 }
 
                 let Some(surfaces) = &state.surfaces else {
