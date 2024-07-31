@@ -19,7 +19,11 @@ Example usage with [Grim](https://git.sr.ht/~emersion/grim) & [Slurp](https://gi
 
 ```bash
 wayfreeze & PID=$!; sleep .1; grim -g "$(slurp)" - | wl-copy; kill $PID
+# or
+$(grim -g "$(slurp)" - | wl-copy; killall wayfreeze) & sleep .1; wayfreeze
 ```
+
+> Note: the Wayland specification [states the following](https://wayland.app/protocols/wlr-layer-shell-unstable-v1#zwlr_layer_shell_v1:enum:layer): "Multiple surfaces can share a single layer, and ordering within a single layer is undefined." This means that compositors can put new layer surfaces **over or under** existing layer surfaces (given they're on the same layer), and **both of those options are compliant to the spec**. That's why there are 2 example commands provided: the first one works on compositors like e.g. Hyprland (where new layer surfaces appear over older ones), while the second one works on e.g. Sway (which puts new layer surfaces underneath already existing ones).
 
 ## Installing
 
