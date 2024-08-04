@@ -403,16 +403,12 @@ impl Dispatch<wl_shm::WlShm, ()> for AppData {
 impl Dispatch<wl_buffer::WlBuffer, ()> for AppData {
     fn event(
         _state: &mut Self,
-        proxy: &wl_buffer::WlBuffer,
-        event: <wl_buffer::WlBuffer as Proxy>::Event,
+        _proxy: &wl_buffer::WlBuffer,
+        _event: <wl_buffer::WlBuffer as Proxy>::Event,
         _data: &(),
         _connection: &wayland_client::Connection,
         _queue_handle: &wayland_client::QueueHandle<Self>,
     ) {
-        if let wl_buffer::Event::Release = event {
-            debug!("| Received wl_buffer::Event::Release");
-            proxy.destroy();
-        }
     }
 }
 
