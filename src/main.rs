@@ -5,6 +5,9 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::hash::Hash;
 use std::os::unix::io::AsFd;
+use std::process::Command;
+use std::thread::sleep;
+use std::time::Duration;
 use tempfile::tempfile;
 use wayland_client::{
     protocol::{
@@ -80,6 +83,9 @@ struct AppData {
     after_cmd: String,
     before_timeout: u64,
     after_timeout: u64,
+    frames_ready: i32,
+    surfaces_ready: i32,
+    output_count: i32,
     exit: bool,
 }
 
@@ -537,29 +543,7 @@ impl Dispatch<ZwlrScreencopyFrameV1, i64> for AppData {
                     data
                 );
                 // copy done, frame is available for reading
-                let Some(surfaces) = &state.surfaces else {
-                    error!("Could not load WlSurfaces");
-                    return;
-                };
-                let Some(pools) = &state.shm_pools else {
-                    error!("Could not load WlShmPools");
-                    return;
-                };
-                let Some(buffers) = &state.buffers else {
-                    error!("Could not load WlBuffers");
-                    return;
-                };
-
-                trace!("  attaching buffer to surface & committing");
-                // attach buffer to surface
-                surfaces[data].attach(Some(&buffers[data]), 0, 0);
-                surfaces[data].set_buffer_scale(1);
-                surfaces[data].commit();
-                info!("> Screen frozen");
-
-                // clean up screencopy_frame & pool
-                proxy.destroy();
-                pools[data].destroy();
+                state.frames_ready += 1;
             }
             zwlr_screencopy_frame_v1::Event::Failed => {
                 debug!(
@@ -735,7 +719,8 @@ impl ScreenFreezer {
         match &self.state.outputs {
             // if the vector exists -> we're good, at least 1 output was found & bound to
             Some(vec) => {
-                info!("> Bound to {} input(s)", vec.len())
+                info!("> Bound to {} input(s)", vec.len());
+                self.state.output_count = vec.len() as i32;
             }
             None => {
                 // no vector -> no outputs found
@@ -744,124 +729,183 @@ impl ScreenFreezer {
             }
         }
 
+        self.state.frames_ready = 0;
+        self.state.surfaces_ready = 0;
+
         self.event_queue.blocking_dispatch(&mut self.state).unwrap();
 
         let Some(outputs) = &self.state.outputs else {
             return Ok(());
         };
 
-        for i in 0..outputs.len() {
-            {
-                let i = i as i64;
-                trace!("  processing output {}", i);
+        // create screencopy frame, copy screen contents to buffer
+        for i in 0..outputs.len() as i64 {
+            trace!("  processing output {}", i);
 
-                let Some(surfaces) = &self.state.surfaces else {
-                    error!("No WlSurface loaded");
-                    return Ok(());
-                };
+            let Some(outputs) = &self.state.outputs else {
+                error!("Could not load WlOutputs");
+                return Ok(());
+            };
+            let Some((screencopy_manager, _)) = &self.state.screencopy_manager else {
+                error!("No ZwlrScreencopyManagerV1 loaded");
+                return Ok(());
+            };
+            let Some((shm, _)) = &self.state.shm else {
+                error!("No WlShm loaded");
+                return Ok(());
+            };
+            let Some(widths) = &self.state.widths else {
+                error!("Could not load widths");
+                return Ok(());
+            };
+            let Some(heights) = &self.state.heights else {
+                error!("Could not load heights");
+                return Ok(());
+            };
 
-                let Some((layer_shell, _)) = &self.state.layer_shell else {
-                    error!("No ZwlrLayerShellV1 loaded");
-                    return Ok(());
-                };
-                let Some(outputs) = &self.state.outputs else {
-                    return Ok(());
-                };
-                let output = &outputs[i as usize];
+            // create pool
+            let tmp = tempfile().ok().expect("Unable to create tempfile");
+            let pool_size = heights[&i] * widths[&i] * 4; // height * width * 4 -> total size of the pool
+            tmp.set_len(pool_size as u64).unwrap();
+            let pool: wl_shm_pool::WlShmPool =
+                wl_shm::WlShm::create_pool(&shm, tmp.as_fd(), pool_size, &self.queue_handle, ());
 
-                trace!("  creating layer surface {}", i);
-                // create a layer surface for the current output & its surface
-                let ls = zwlr_layer_shell_v1::ZwlrLayerShellV1::get_layer_surface(
-                    layer_shell,
-                    &surfaces[&i],
-                    Some(&output),
-                    Layer::Overlay,
-                    "wayfreeze".to_string(),
-                    &self.queue_handle,
-                    i,
-                );
+            trace!("  capturing output {}", i);
+            // create screencopyframe from output
+            let screencopy_frame = screencopy_manager.capture_output(
+                !self.state.hide_cursor as i32,
+                &outputs[i as usize],
+                &self.queue_handle,
+                i,
+            );
+            vec_insert(&mut self.state.screencopy_frames, i, screencopy_frame);
+            vec_insert(&mut self.state.shm_pools, i, pool);
+        }
 
-                // configure layer surface
-                ls.set_anchor(Anchor::Top | Anchor::Right | Anchor::Bottom | Anchor::Left);
-                ls.set_exclusive_zone(-1); // extend surface to anchored edges
-                ls.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
-
-                vec_insert(&mut self.state.layer_surfaces, i, ls);
-
-                surfaces[&i].commit();
-
-                let Some((viewporter, _)) = &self.state.viewporter else {
-                    error!("No WpViewPorter loaded");
-                    return Ok(());
-                };
-                let Some((fs_manager, _)) = &self.state.fs_manager else {
-                    error!("No WpFractionalScaleManagerV1 loaded");
-                    return Ok(());
-                };
-
-                // instantiates an interface extension for the wl_surface to crop & scale its content
-                vec_insert(
-                    &mut self.state.viewports,
-                    i,
-                    viewporter.get_viewport(&surfaces[&i], &self.queue_handle, ()),
-                );
-                // create add-on object for the surface so that compositor can request fractional scales, will send preferred_scale event
-                fs_manager.get_fractional_scale(&surfaces[&i], &self.queue_handle, i);
-
-                // wait for the PreferredScale event
-                self.event_queue.blocking_dispatch(&mut self.state).unwrap();
-
-                let Some(surfaces) = &self.state.surfaces else {
-                    error!("No WlSurface loaded");
-                    return Ok(());
-                };
-                trace!("  committing to surface {} before attaching buffers", i);
-                surfaces[&i].commit(); // commit before attaching any buffers
-
-                let Some(outputs) = &self.state.outputs else {
-                    error!("Could not load WlOutputs");
-                    return Ok(());
-                };
-                let Some((screencopy_manager, _)) = &self.state.screencopy_manager else {
-                    error!("No ZwlrScreencopyManagerV1 loaded");
-                    return Ok(());
-                };
-                let Some((shm, _)) = &self.state.shm else {
-                    error!("No WlShm loaded");
-                    return Ok(());
-                };
-                let Some(widths) = &self.state.widths else {
-                    error!("Could not load widths");
-                    return Ok(());
-                };
-                let Some(heights) = &self.state.heights else {
-                    error!("Could not load heights");
-                    return Ok(());
-                };
-
-                // create pool
-                let tmp = tempfile().ok().expect("Unable to create tempfile");
-                let pool_size = heights[&i] * widths[&i] * 4; // height * width * 4 -> total size of the pool
-                tmp.set_len(pool_size as u64).unwrap();
-                let pool: wl_shm_pool::WlShmPool = wl_shm::WlShm::create_pool(
-                    &shm,
-                    tmp.as_fd(),
-                    pool_size,
-                    &self.queue_handle,
-                    (),
-                );
-
-                trace!("  capturing output {}", i);
-                // create screencopyframe from output
-                let screencopy_frame = screencopy_manager.capture_output(
-                    !self.state.hide_cursor as i32,
-                    &outputs[i as usize],
-                    &self.queue_handle,
-                    i,
-                );
-                vec_insert(&mut self.state.screencopy_frames, i, screencopy_frame);
-                vec_insert(&mut self.state.shm_pools, i, pool);
+        // wait for all frames to be copied & run before-freeze commands
+        loop {
+            self.event_queue.blocking_dispatch(&mut self.state).unwrap();
+            if self.state.frames_ready == self.state.output_count as i32 {
+                if &self.state.before_cmd != "" {
+                    info!(
+                        "> Running before-freeze commands: {}",
+                        &self.state.before_cmd
+                    );
+                    Command::new("sh")
+                        .arg("-c")
+                        .arg(&self.state.before_cmd)
+                        .spawn()
+                        .expect("Failed to run before-freeze commands");
+                    sleep(Duration::from_millis(self.state.before_timeout));
+                }
+                break;
             }
+        }
+
+        let Some(outputs) = &self.state.outputs else {
+            return Ok(());
+        };
+
+        // create & configure layer surface, attach buffer to it, fractional scaling & some cleanup
+        for i in 0..outputs.len() as i64 {
+            let Some(surfaces) = &self.state.surfaces else {
+                error!("No WlSurface loaded");
+                return Ok(());
+            };
+            let Some((layer_shell, _)) = &self.state.layer_shell else {
+                error!("No ZwlrLayerShellV1 loaded");
+                return Ok(());
+            };
+            let Some(outputs) = &self.state.outputs else {
+                return Ok(());
+            };
+            let output = &outputs[i as usize];
+
+            trace!("  creating layer surface {}", i);
+            // create a layer surface for the current output & its surface
+            let ls = zwlr_layer_shell_v1::ZwlrLayerShellV1::get_layer_surface(
+                layer_shell,
+                &surfaces[&i],
+                Some(&output),
+                Layer::Overlay,
+                "wayfreeze".to_string(),
+                &self.queue_handle,
+                i,
+            );
+
+            // configure layer surface
+            ls.set_anchor(Anchor::Top | Anchor::Right | Anchor::Bottom | Anchor::Left);
+            ls.set_exclusive_zone(-1); // extend surface to anchored edges
+            ls.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
+
+            vec_insert(&mut self.state.layer_surfaces, i, ls);
+
+            surfaces[&i].commit();
+
+            let Some((viewporter, _)) = &self.state.viewporter else {
+                error!("No WpViewPorter loaded");
+                return Ok(());
+            };
+            let Some((fs_manager, _)) = &self.state.fs_manager else {
+                error!("No WpFractionalScaleManagerV1 loaded");
+                return Ok(());
+            };
+            // instantiates an interface extension for the wl_surface to crop & scale its content
+            vec_insert(
+                &mut self.state.viewports,
+                i,
+                viewporter.get_viewport(&surfaces[&i], &self.queue_handle, ()),
+            );
+            // create add-on object for the surface so that compositor can request fractional scales, will send preferred_scale event
+            fs_manager.get_fractional_scale(&surfaces[&i], &self.queue_handle, i);
+
+            // wait for the PreferredScale event
+            self.event_queue.blocking_dispatch(&mut self.state).unwrap();
+
+            let Some(surfaces) = &self.state.surfaces else {
+                error!("No WlSurface loaded");
+                return Ok(());
+            };
+            let Some(buffers) = &self.state.buffers else {
+                error!("No WlBuffers loaded");
+                return Ok(());
+            };
+            trace!("  committing to surface {} before attaching buffers", i);
+            surfaces[&i].commit(); // commit before attaching any buffers
+
+            trace!("  attaching buffer to surface");
+            surfaces[&i].attach(Some(&buffers[&i]), 0, 0);
+            surfaces[&i].set_buffer_scale(1);
+            surfaces[&i].commit();
+            self.state.surfaces_ready += 1;
+
+            let Some(screencopy_frames) = &self.state.screencopy_frames else {
+                error!("No ZwlrScreencopyFrame loaded");
+                return Ok(());
+            };
+            let Some(shm_pools) = &self.state.shm_pools else {
+                error!("No WlShmPool loaded");
+                return Ok(());
+            };
+            // clean up screencopy_frame & pool
+            screencopy_frames[&i].destroy();
+            shm_pools[&i].destroy();
+            buffers[&i].destroy();
+        }
+
+        while self.state.surfaces_ready != self.state.output_count as i32 {
+            self.event_queue.blocking_dispatch(&mut self.state).unwrap();
+        }
+        info!("> Screen frozen");
+
+        if &self.state.after_cmd != "" {
+            sleep(Duration::from_millis(self.state.after_timeout));
+            info!("> Running after-freeze commands: {}", &self.state.after_cmd);
+            Command::new("sh")
+                .arg("-c")
+                .arg(&self.state.after_cmd)
+                .spawn()
+                .expect("Failed to run after-freeze commands");
         }
 
         loop {
