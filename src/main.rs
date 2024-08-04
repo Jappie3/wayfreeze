@@ -76,6 +76,10 @@ struct AppData {
     screencopy_manager: Option<(ZwlrScreencopyManagerV1, u32)>,
     layer_shell: Option<(zwlr_layer_shell_v1::ZwlrLayerShellV1, u32)>,
     hide_cursor: bool,
+    before_cmd: String,
+    after_cmd: String,
+    before_timeout: u64,
+    after_timeout: u64,
     exit: bool,
 }
 
@@ -696,7 +700,13 @@ struct ScreenFreezer {
 }
 
 impl ScreenFreezer {
-    fn new(hide_cursor: bool) -> Result<Self, Box<dyn Error>> {
+    fn new(
+        hide_cursor: bool,
+        before_cmd: String,
+        after_cmd: String,
+        before_timeout: u64,
+        after_timeout: u64,
+    ) -> Result<Self, Box<dyn Error>> {
         let connection = Connection::connect_to_env().unwrap();
         let mut event_queue = connection.new_event_queue();
         let queue_handle = event_queue.handle();
@@ -704,6 +714,10 @@ impl ScreenFreezer {
         let _registry = display.get_registry(&queue_handle, ());
         let mut state = AppData::default();
         state.hide_cursor = hide_cursor;
+        state.before_cmd = before_cmd;
+        state.after_cmd = after_cmd;
+        state.before_timeout = before_timeout;
+        state.after_timeout = after_timeout;
 
         event_queue.roundtrip(&mut state).unwrap();
         info!("> Received all globals");
@@ -863,8 +877,20 @@ impl ScreenFreezer {
 #[command(version, about, long_about = None)]
 struct Args {
     /// Hide cursor when freezing the screen.
-    #[arg(long, default_value_t = false)]
+    #[arg(long, required = false, default_value_t = false)]
     hide_cursor: bool,
+    /// Command to run before freezing the screen.
+    #[arg(long, required = false, default_value = "")]
+    before_freeze_cmd: String,
+    /// Amount of milliseconds to wait between before-freeze-cmd and freezing the screen.
+    #[arg(long, required = false, default_value_t = 0)]
+    before_freeze_timeout: u64,
+    /// Command to run after freezing the screen.
+    #[arg(long, required = false, default_value = "")]
+    after_freeze_cmd: String,
+    /// Amount of milliseconds to wait between freezing the screen and running after-freeze-cmd.
+    #[arg(long, required = false, default_value_t = 0)]
+    after_freeze_timeout: u64,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -872,7 +898,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
     info!("> Parsed arguments");
 
-    match ScreenFreezer::new(args.hide_cursor) {
+    match ScreenFreezer::new(
+        args.hide_cursor,
+        args.before_freeze_cmd,
+        args.after_freeze_cmd,
+        args.before_freeze_timeout,
+        args.after_freeze_timeout,
+    ) {
         Ok(mut sf) => sf.freeze().unwrap(),
         Err(e) => panic!("Could not create ScreenFreezer: {}", e),
     };
