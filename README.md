@@ -10,38 +10,58 @@ Run `wayfreeze`, click or press escape to exit.
 Usage: wayfreeze [OPTIONS]
 
 Options:
-      --hide-cursor  Hide cursor when freezing the screen
-  -h, --help         Print help
-  -V, --version      Print version
+      --hide-cursor
+          Hide cursor when freezing the screen
+      --before-freeze-cmd <BEFORE_FREEZE_CMD>
+          Command to run before freezing the screen
+      --before-freeze-timeout <BEFORE_FREEZE_TIMEOUT>
+          Amount of milliseconds to wait between before-freeze-cmd and freezing the screen
+      --after-freeze-cmd <AFTER_FREEZE_CMD>
+          Command to run after freezing the screen
+      --after-freeze-timeout <AFTER_FREEZE_TIMEOUT>
+          Amount of milliseconds to wait between freezing the screen and running after-freeze-cmd
+  -h, --help
+          Print help
+  -V, --version
+          Print version
 ```
 
 Example usage with [Grim](https://git.sr.ht/~emersion/grim) & [Slurp](https://github.com/emersion/slurp):
 
 ```bash
+# for e.g. Hyprland:
 wayfreeze & PID=$!; sleep .1; grim -g "$(slurp)" - | wl-copy; kill $PID
-# or
-$(grim -g "$(slurp)" - | wl-copy; killall wayfreeze) & sleep .1; wayfreeze
+# or:
+wayfreeze --after-freeze-cmd 'grim -g "$(slurp)" - | wl-copy; killall wayfreeze'
+
+# for e.g. Sway:
+wayfreeze --before-freeze-cmd 'grim -g "$(slurp)" - | wl-copy; killall wayfreeze' --before-freeze-timeout 10"
 ```
 
-> Note: the Wayland specification [states the following](https://wayland.app/protocols/wlr-layer-shell-unstable-v1#zwlr_layer_shell_v1:enum:layer): "Multiple surfaces can share a single layer, and ordering within a single layer is undefined." This means that compositors can put new layer surfaces **over or under** existing layer surfaces (given they're on the same layer), and **both of those options are compliant to the spec**. That's why there are 2 example commands provided: the first one works on compositors like e.g. Hyprland (where new layer surfaces appear over older ones), while the second one works on e.g. Sway (which puts new layer surfaces underneath already existing ones).
+> Note: the Wayland specification [states the following](https://wayland.app/protocols/wlr-layer-shell-unstable-v1#zwlr_layer_shell_v1:enum:layer): "Multiple surfaces can share a single layer, and ordering within a single layer is undefined." This means that compositors can put new layer surfaces **over or under** existing layer surfaces (given they're on the same layer), and **both of those options are compliant to the spec**. Compositors like e.g. Hyprland put new layer surfaces over older ones, while e.g. Sway puts new layer surfaces underneath already existing ones. If you're unsure how your compositor handles this, just try both commands while playing a video or something. One will work, the other one won't.
 
 ## Installing
 
 Wayfreeze can be installed either by using nixpkgs-unstable or flake.
 
 ### Nixpkgs:
+
 Add this to your configuration and rebuild your system:
+
 ```nix
 environment.systemPackages = [ pkgs.wayfreeze ];
 ```
 
 ### Flake:
+
 Add this repository as a flake to your inputs:
+
 ```nix
 wayfreeze.url = "github:jappie3/wayfreeze";
 ```
 
 Define the package and then rebuild your system:
+
 ```nix
 environment.systemPackages = [ inputs.wayfreeze.packages.${pkgs.system}.wayfreeze ];
 ```
