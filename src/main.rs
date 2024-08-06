@@ -223,10 +223,6 @@ impl Dispatch<wl_output::WlOutput, usize> for AppData {
         } = event
         {
             debug!("| Received wl_output::Event::Mode for output {}", data);
-            trace!(
-                "  this is output number {}",
-                state.outputs.as_ref().map(|v| v.len()).unwrap_or(0)
-            );
             // describes an available output mode for the output
 
             // save the width & height of this output under the same key as this output's index in the vector
@@ -735,6 +731,7 @@ impl ScreenFreezer {
         };
 
         // create screencopy frame, copy screen contents to buffer
+        info!("> Processing {} output(s)", outputs.len());
         for i in 0..outputs.len() as i64 {
             trace!("  processing output {}", i);
 
@@ -777,6 +774,7 @@ impl ScreenFreezer {
             vec_insert(&mut self.state.screencopy_frames, i, screencopy_frame);
             vec_insert(&mut self.state.shm_pools, i, pool);
         }
+        info!("> Processed {} output(s)", outputs.len());
 
         // wait for all frames to be copied & run before-freeze commands
         loop {
@@ -803,6 +801,7 @@ impl ScreenFreezer {
         };
 
         // create & configure layer surface, attach buffer to it, fractional scaling & some cleanup
+        info!("> Creating {} layer surface(s)", outputs.len());
         for i in 0..outputs.len() as i64 {
             let Some(surfaces) = &self.state.surfaces else {
                 error!("No WlSurface loaded");
