@@ -919,16 +919,16 @@ struct Args {
     #[arg(long, required = false, default_value_t = false)]
     hide_cursor: bool,
     /// Command to run before freezing the screen.
-    #[arg(long, required = false, default_value = "")]
+    #[arg(long, hide_default_value = true, required = false, default_value = "")]
     before_freeze_cmd: String,
     /// Amount of milliseconds to wait between before-freeze-cmd and freezing the screen.
-    #[arg(long, required = false, default_value_t = 0)]
+    #[arg(long, hide_default_value = true, required = false, default_value_t = 0)]
     before_freeze_timeout: u64,
     /// Command to run after freezing the screen.
-    #[arg(long, required = false, default_value = "")]
+    #[arg(long, hide_default_value = true, required = false, default_value = "")]
     after_freeze_cmd: String,
     /// Amount of milliseconds to wait between freezing the screen and running after-freeze-cmd.
-    #[arg(long, required = false, default_value_t = 0)]
+    #[arg(long, hide_default_value = true, required = false, default_value_t = 0)]
     after_freeze_timeout: u64,
 }
 
