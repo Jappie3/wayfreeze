@@ -729,7 +729,7 @@ impl ScreenFreezer {
         match &self.state.outputs {
             // if the vector exists -> we're good, at least 1 output was found & bound to
             Some(vec) => {
-                info!("> Bound to {} input(s)", vec.len());
+                info!("> Bound to {} output(s)", vec.len());
                 self.state.output_count = vec.len() as i32;
             }
             None => {
