@@ -23,6 +23,10 @@ use wayland_protocols::wp::{
     },
     viewporter::{client::wp_viewport::WpViewport, client::wp_viewporter::WpViewporter},
 };
+use wayland_protocols::xdg::xdg_output::zv1::client::{
+    zxdg_output_manager_v1::ZxdgOutputManagerV1,
+    zxdg_output_v1::{self, ZxdgOutputV1},
+};
 use wayland_protocols_wlr::{
     layer_shell::v1::client::{
         zwlr_layer_shell_v1::{self, Layer},
@@ -74,6 +78,7 @@ struct AppData {
     context: Option<xkb::Context>,
     keymap: Option<xkb::Keymap>,
     kbstate: Option<xkb::State>,
+    xdg_output_manager: Option<(ZxdgOutputManagerV1, u32)>,
     fs_manager: Option<(WpFractionalScaleManagerV1, u32)>,
     viewporter: Option<(WpViewporter, u32)>,
     shm: Option<(wl_shm::WlShm, u32)>,
@@ -148,6 +153,13 @@ impl Dispatch<wl_registry::WlRegistry, ()> for AppData {
                 {
                     // wp_viewporter
                     state.viewporter = Some((proxy.bind(name, version, queue_handle, ()), name));
+                } else if interface == ZxdgOutputManagerV1::interface().name
+                    && state.xdg_output_manager.is_none()
+                {
+                    // zxdg_output_manager_v1
+                    info!("> Bound: {interface} v{version}");
+                    state.xdg_output_manager =
+                        Some((proxy.bind(name, version, queue_handle, ()), name));
                 } else if interface == ZwlrScreencopyManagerV1::interface().name
                     && state.screencopy_manager.is_none()
                 {
@@ -210,37 +222,13 @@ impl Dispatch<wl_registry::WlRegistry, ()> for AppData {
 impl Dispatch<wl_output::WlOutput, usize> for AppData {
     fn event(
         state: &mut Self,
-        _proxy: &wl_output::WlOutput,
+        proxy: &wl_output::WlOutput,
         event: <wl_output::WlOutput as Proxy>::Event,
         data: &usize,
         _connection: &wayland_client::Connection,
         queue_handle: &wayland_client::QueueHandle<Self>,
     ) {
         match event {
-            wl_output::Event::Mode {
-                flags: _,
-                width,
-                height,
-                refresh: _,
-            } => {
-                debug!("| Received wl_output::Event::Mode for output {}", data);
-                // describes an available output mode for the output
-
-                // save the width & height of this output under the same key as this output's index in the vector
-                vec_insert(&mut state.widths, *data as i64, width);
-                vec_insert(&mut state.heights, *data as i64, height);
-
-                // create a surface for this output & store it
-                let Some((compositor, _)) = &state.compositor else {
-                    error!("No WlCompositor loaded");
-                    return;
-                };
-                vec_insert(
-                    &mut state.surfaces,
-                    *data as i64,
-                    compositor.create_surface(&queue_handle, ()),
-                );
-            }
             wl_output::Event::Geometry {
                 x: _,
                 y: _,
@@ -254,7 +242,29 @@ impl Dispatch<wl_output::WlOutput, usize> for AppData {
                 debug!("| Received wl_output::Event::Geometry for output {}", data);
                 // describes transformations that clients and compositors apply to buffer contents
 
-                vec_insert(&mut state.transforms, *data as i64, transform.into_result().unwrap());
+                vec_insert(
+                    &mut state.transforms,
+                    *data as i64,
+                    transform.into_result().unwrap(),
+                );
+
+                let Some((xdg_output_manager, _)) = &state.xdg_output_manager else {
+                    error!("No ZxdgOutputManagerV1 loaded");
+                    return;
+                };
+                // create an xdg_output object for this wl_output
+                xdg_output_manager.get_xdg_output(proxy, &queue_handle, *data as i64);
+
+                // create a surface for this output & store it
+                let Some((compositor, _)) = &state.compositor else {
+                    error!("No WlCompositor loaded");
+                    return;
+                };
+                vec_insert(
+                    &mut state.surfaces,
+                    *data as i64,
+                    compositor.create_surface(&queue_handle, ()),
+                );
             }
             _ => {}
         };
@@ -562,6 +572,45 @@ impl Dispatch<ZwlrScreencopyFrameV1, i64> for AppData {
                 );
                 error!("Failed to get a screencopyframe (output {})", data);
                 state.exit = true;
+            }
+            _ => (),
+        }
+    }
+}
+
+// has no events
+impl Dispatch<ZxdgOutputManagerV1, ()> for AppData {
+    fn event(
+        _state: &mut Self,
+        _proxy: &ZxdgOutputManagerV1,
+        _event: <ZxdgOutputManagerV1 as Proxy>::Event,
+        _data: &(),
+        _connection: &wayland_client::Connection,
+        _queue_handle: &wayland_client::QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<ZxdgOutputV1, i64> for AppData {
+    fn event(
+        state: &mut Self,
+        _proxy: &ZxdgOutputV1,
+        event: <ZxdgOutputV1 as Proxy>::Event,
+        data: &i64,
+        _connection: &wayland_client::Connection,
+        _queue_handle: &wayland_client::QueueHandle<Self>,
+    ) {
+        match event {
+            zxdg_output_v1::Event::LogicalSize { width, height } => {
+                // describes the size of the output in the global compositor space
+                debug!(
+                    "| Received zxdg_output_v1::Event::LogicalSize for output {}",
+                    data
+                );
+
+                // save the width & height of this output under the same key as this output's index in the vector
+                vec_insert(&mut state.widths, *data, width);
+                vec_insert(&mut state.heights, *data, height);
             }
             _ => (),
         }
