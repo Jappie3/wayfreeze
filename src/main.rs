@@ -91,6 +91,7 @@ struct AppData {
     after_timeout: u64,
     frames_ready: i32,
     surfaces_ready: i32,
+    outputs_ready: i32,
     output_count: i32,
     exit: bool,
 }
@@ -611,6 +612,7 @@ impl Dispatch<ZxdgOutputV1, i64> for AppData {
                 // save the width & height of this output under the same key as this output's index in the vector
                 vec_insert(&mut state.widths, *data, width);
                 vec_insert(&mut state.heights, *data, height);
+                state.outputs_ready += 1;
             }
             _ => (),
         }
@@ -788,10 +790,18 @@ impl ScreenFreezer {
             }
         }
 
+        self.state.outputs_ready = 0;
         self.state.frames_ready = 0;
         self.state.surfaces_ready = 0;
 
         self.event_queue.blocking_dispatch(&mut self.state).unwrap();
+
+        loop {
+            self.event_queue.blocking_dispatch(&mut self.state).unwrap();
+            if self.state.outputs_ready == self.state.output_count as i32 {
+                break;
+            }
+        }
 
         let Some(outputs) = &self.state.outputs else {
             return Ok(());
