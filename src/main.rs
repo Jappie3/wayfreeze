@@ -65,6 +65,8 @@ struct AppData {
     surfaces: Option<HashMap<i64, wl_surface::WlSurface>>,
     widths: Option<HashMap<i64, i32>>,
     heights: Option<HashMap<i64, i32>>,
+    buffer_widths: Option<HashMap<i64, i32>>,
+    buffer_heights: Option<HashMap<i64, i32>>,
     transforms: Option<HashMap<i64, wayland_client::protocol::wl_output::Transform>>,
     scales: Option<HashMap<i64, i32>>,
     viewports: Option<HashMap<i64, WpViewport>>,
@@ -541,6 +543,8 @@ impl Dispatch<ZwlrScreencopyFrameV1, i64> for AppData {
                     &queue_handle,
                     (),
                 );
+                vec_insert(&mut state.buffer_widths, *data, width as i32);
+                vec_insert(&mut state.buffer_heights, *data, height as i32);
                 vec_insert(&mut state.buffers, *data, buffer);
             }
             zwlr_screencopy_frame_v1::Event::BufferDone { .. } => {
@@ -683,7 +687,14 @@ impl Dispatch<WpFractionalScaleV1, i64> for AppData {
                     error!("Could not load heights");
                     return;
                 };
-
+                let Some(buffer_widths) = &state.buffer_widths else {
+                    error!("Could not load buffer widths");
+                    return;
+                };
+                let Some(buffer_heights) = &state.buffer_heights else {
+                    error!("Could not load buffer heights");
+                    return;
+                };
                 trace!(
                     "  setting scale to {}/120 = {}, width: {} height: {}",
                     scale,
@@ -693,7 +704,7 @@ impl Dispatch<WpFractionalScaleV1, i64> for AppData {
                 );
 
                 // set source & destination rectangle
-                viewports[data].set_source(0.0, 0.0, widths[data] as f64, heights[data] as f64);
+                viewports[data].set_source(0.0, 0.0, buffer_widths[data].into(), buffer_heights[data].into());
                 viewports[data].set_destination(
                     (widths[data] as f64 / (scale as f64 / 120.0)) as i32,
                     (heights[data] as f64 / (scale as f64 / 120.0)) as i32,
