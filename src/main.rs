@@ -61,6 +61,7 @@ struct AppData {
     surfaces: Option<HashMap<i64, wl_surface::WlSurface>>,
     widths: Option<HashMap<i64, i32>>,
     heights: Option<HashMap<i64, i32>>,
+    transforms: Option<HashMap<i64, wayland_client::protocol::wl_output::Transform>>,
     scales: Option<HashMap<i64, i32>>,
     viewports: Option<HashMap<i64, WpViewport>>,
     shm_pools: Option<HashMap<i64, wl_shm_pool::WlShmPool>>,
@@ -215,30 +216,47 @@ impl Dispatch<wl_output::WlOutput, usize> for AppData {
         _connection: &wayland_client::Connection,
         queue_handle: &wayland_client::QueueHandle<Self>,
     ) {
-        if let wl_output::Event::Mode {
-            flags: _,
-            width,
-            height,
-            refresh: _,
-        } = event
-        {
-            debug!("| Received wl_output::Event::Mode for output {}", data);
-            // describes an available output mode for the output
+        match event {
+            wl_output::Event::Mode {
+                flags: _,
+                width,
+                height,
+                refresh: _,
+            } => {
+                debug!("| Received wl_output::Event::Mode for output {}", data);
+                // describes an available output mode for the output
 
-            // save the width & height of this output under the same key as this output's index in the vector
-            vec_insert(&mut state.widths, *data as i64, width);
-            vec_insert(&mut state.heights, *data as i64, height);
+                // save the width & height of this output under the same key as this output's index in the vector
+                vec_insert(&mut state.widths, *data as i64, width);
+                vec_insert(&mut state.heights, *data as i64, height);
 
-            // create a surface for this output & store it
-            let Some((compositor, _)) = &state.compositor else {
-                error!("No WlCompositor loaded");
-                return;
-            };
-            vec_insert(
-                &mut state.surfaces,
-                *data as i64,
-                compositor.create_surface(&queue_handle, ()),
-            );
+                // create a surface for this output & store it
+                let Some((compositor, _)) = &state.compositor else {
+                    error!("No WlCompositor loaded");
+                    return;
+                };
+                vec_insert(
+                    &mut state.surfaces,
+                    *data as i64,
+                    compositor.create_surface(&queue_handle, ()),
+                );
+            }
+            wl_output::Event::Geometry {
+                x: _,
+                y: _,
+                physical_width: _,
+                physical_height: _,
+                subpixel: _,
+                make: _,
+                model: _,
+                transform,
+            } => {
+                debug!("| Received wl_output::Event::Geometry for output {}", data);
+                // describes transformations that clients and compositors apply to buffer contents
+
+                vec_insert(&mut state.transforms, *data as i64, transform.into_result().unwrap());
+            }
+            _ => {}
         };
     }
 }
@@ -865,12 +883,17 @@ impl ScreenFreezer {
                 error!("No WlBuffers loaded");
                 return Ok(());
             };
+            let Some(transforms) = &self.state.transforms else {
+                error!("No transforms loaded");
+                return Ok(());
+            };
             trace!("  committing to surface {} before attaching buffers", i);
             surfaces[&i].commit(); // commit before attaching any buffers
 
             trace!("  attaching buffer to surface");
             surfaces[&i].attach(Some(&buffers[&i]), 0, 0);
             surfaces[&i].set_buffer_scale(1);
+            surfaces[&i].set_buffer_transform(transforms[&i]);
             surfaces[&i].commit();
             self.state.surfaces_ready += 1;
 
