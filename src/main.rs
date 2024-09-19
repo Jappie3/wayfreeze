@@ -704,7 +704,12 @@ impl Dispatch<WpFractionalScaleV1, i64> for AppData {
                 );
 
                 // set source & destination rectangle
-                viewports[data].set_source(0.0, 0.0, buffer_widths[data].into(), buffer_heights[data].into());
+                viewports[data].set_source(
+                    0.0,
+                    0.0,
+                    buffer_widths[data].into(),
+                    buffer_heights[data].into(),
+                );
                 viewports[data].set_destination(
                     (widths[data] as f64 / (scale as f64 / 120.0)) as i32,
                     (heights[data] as f64 / (scale as f64 / 120.0)) as i32,
