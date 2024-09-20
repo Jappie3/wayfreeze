@@ -689,11 +689,11 @@ impl Dispatch<WpFractionalScaleV1, i64> for AppData {
                     error!("Could not load WpViewPortV1s");
                     return;
                 };
-                let Some(phys_widths) = &state.phys_widths else {
+                let Some(widths) = &state.widths else {
                     error!("Could not load widths");
                     return;
                 };
-                let Some(phys_heights) = &state.phys_heights else {
+                let Some(heights) = &state.heights else {
                     error!("Could not load heights");
                     return;
                 };
@@ -701,21 +701,15 @@ impl Dispatch<WpFractionalScaleV1, i64> for AppData {
                     "  setting scale to {}/120 = {}, width: {} height: {}",
                     scale,
                     scale as f64 / 120.0,
-                    phys_widths[data],
-                    phys_heights[data]
+                    widths[data],
+                    heights[data]
                 );
 
                 // set source & destination rectangle
                 viewports[data].set_source(-1.0, -1.0, -1.0, -1.0);
-                viewports[data].set_destination(
-                    (phys_widths[data] as f64 / (scale as f64 / 120.0)) as i32,
-                    (phys_heights[data] as f64 / (scale as f64 / 120.0)) as i32,
-                );
+                viewports[data].set_destination(widths[data] as i32, heights[data] as i32);
                 // update layer surface size every time the preferred scale changes
-                layer_surfaces[data].set_size(
-                    (phys_widths[data] as f64 / (scale as f64 / 120.0)) as u32,
-                    (phys_heights[data] as f64 / (scale as f64 / 120.0)) as u32,
-                );
+                layer_surfaces[data].set_size(widths[data] as u32, heights[data] as u32);
                 surfaces[data].commit();
 
                 vec_insert(&mut state.scales, *data, scale as i32)
