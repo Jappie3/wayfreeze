@@ -65,6 +65,8 @@ struct AppData {
     surfaces: Option<HashMap<i64, wl_surface::WlSurface>>,
     widths: Option<HashMap<i64, i32>>,
     heights: Option<HashMap<i64, i32>>,
+    phys_widths: Option<HashMap<i64, i32>>,
+    phys_heights: Option<HashMap<i64, i32>>,
     transforms: Option<HashMap<i64, wayland_client::protocol::wl_output::Transform>>,
     scales: Option<HashMap<i64, i32>>,
     viewports: Option<HashMap<i64, WpViewport>>,
@@ -230,6 +232,18 @@ impl Dispatch<wl_output::WlOutput, usize> for AppData {
         queue_handle: &wayland_client::QueueHandle<Self>,
     ) {
         match event {
+            wl_output::Event::Mode {
+                flags: _,
+                width,
+                height,
+                refresh: _,
+            } => {
+                debug!("| Received wl_output::Event::Mode for output {}", data);
+                // describes an available output mode for the output
+                // save the physical width & height of this output under the same key as this output's index in the vector
+                vec_insert(&mut state.phys_widths, *data as i64, width);
+                vec_insert(&mut state.phys_heights, *data as i64, height);
+            }
             wl_output::Event::Geometry {
                 x: _,
                 y: _,
@@ -675,11 +689,11 @@ impl Dispatch<WpFractionalScaleV1, i64> for AppData {
                     error!("Could not load WpViewPortV1s");
                     return;
                 };
-                let Some(widths) = &state.widths else {
+                let Some(phys_widths) = &state.phys_widths else {
                     error!("Could not load widths");
                     return;
                 };
-                let Some(heights) = &state.heights else {
+                let Some(phys_heights) = &state.phys_heights else {
                     error!("Could not load heights");
                     return;
                 };
@@ -687,20 +701,20 @@ impl Dispatch<WpFractionalScaleV1, i64> for AppData {
                     "  setting scale to {}/120 = {}, width: {} height: {}",
                     scale,
                     scale as f64 / 120.0,
-                    widths[data],
-                    heights[data]
+                    phys_widths[data],
+                    phys_heights[data]
                 );
 
                 // set source & destination rectangle
                 viewports[data].set_source(-1.0, -1.0, -1.0, -1.0);
                 viewports[data].set_destination(
-                    (widths[data] as f64 / (scale as f64 / 120.0)) as i32,
-                    (heights[data] as f64 / (scale as f64 / 120.0)) as i32,
+                    (phys_widths[data] as f64 / (scale as f64 / 120.0)) as i32,
+                    (phys_heights[data] as f64 / (scale as f64 / 120.0)) as i32,
                 );
                 // update layer surface size every time the preferred scale changes
                 layer_surfaces[data].set_size(
-                    (widths[data] as f64 / (scale as f64 / 120.0)) as u32,
-                    (heights[data] as f64 / (scale as f64 / 120.0)) as u32,
+                    (phys_widths[data] as f64 / (scale as f64 / 120.0)) as u32,
+                    (phys_heights[data] as f64 / (scale as f64 / 120.0)) as u32,
                 );
                 surfaces[data].commit();
 
@@ -831,10 +845,17 @@ impl ScreenFreezer {
                 error!("Could not load heights");
                 return Ok(());
             };
-
+            let Some(phys_widths) = &self.state.phys_widths else {
+                error!("Could not load widths");
+                return Ok(());
+            };
+            let Some(phys_heights) = &self.state.phys_heights else {
+                error!("Could not load heights");
+                return Ok(());
+            };
             // create pool
             let tmp = tempfile().ok().expect("Unable to create tempfile");
-            let pool_size = heights[&i] * widths[&i] * 4; // height * width * 4 -> total size of the pool
+            let pool_size = phys_heights[&i] * phys_widths[&i] * 4; // height * width * 4 -> total size of the pool
             tmp.set_len(pool_size as u64).unwrap();
             let pool: wl_shm_pool::WlShmPool =
                 wl_shm::WlShm::create_pool(&shm, tmp.as_fd(), pool_size, &self.queue_handle, ());
