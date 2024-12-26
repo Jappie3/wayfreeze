@@ -29,16 +29,16 @@ Options:
 Example usage with [Grim](https://git.sr.ht/~emersion/grim) & [Slurp](https://github.com/emersion/slurp):
 
 ```bash
-# for e.g. Hyprland:
+# for e.g. Hyprland or Sway (as of Sway 1.10-rc4):
 wayfreeze & PID=$!; sleep .1; grim -g "$(slurp)" - | wl-copy; kill $PID
 # or:
 wayfreeze --after-freeze-cmd 'grim -g "$(slurp)" - | wl-copy; killall wayfreeze'
 
-# for e.g. Sway:
-wayfreeze --before-freeze-cmd 'grim -g "$(slurp)" - | wl-copy; killall wayfreeze' --before-freeze-timeout 10"
+# for compositors that order layer surfaces the other way around:
+wayfreeze --before-freeze-cmd 'grim -g "$(slurp)" - | wl-copy; killall wayfreeze' --before-freeze-timeout 10
 ```
 
-> Note: the Wayland specification [states the following](https://wayland.app/protocols/wlr-layer-shell-unstable-v1#zwlr_layer_shell_v1:enum:layer): "Multiple surfaces can share a single layer, and ordering within a single layer is undefined." This means that compositors can put new layer surfaces **over or under** existing layer surfaces (given they're on the same layer), and **both of those options are compliant to the spec**. Compositors like e.g. Hyprland put new layer surfaces over older ones, while e.g. Sway puts new layer surfaces underneath already existing ones. If you're unsure how your compositor handles this, just try both commands while playing a video or something. One will work, the other one won't.
+> Note: the Wayland specification [states the following](https://wayland.app/protocols/wlr-layer-shell-unstable-v1#zwlr_layer_shell_v1:enum:layer): "Multiple surfaces can share a single layer, and ordering within a single layer is undefined." This means that compositors can put new layer surfaces **over or under** existing layer surfaces (given they're on the same layer), and **both of those options are compliant to the spec**. Compositors like e.g. Hyprland and Sway (since Sway 1.10-rc4) put new layer surfaces over older ones, while e.g. Sway (before 1.10-rc4) put new layer surfaces underneath already existing ones. If you're unsure how your compositor handles this, just try both commands while playing a video or something. One will work, the other one won't.
 
 ## Installing
 
@@ -65,6 +65,12 @@ Define the package and then rebuild your system:
 ```nix
 environment.systemPackages = [ inputs.wayfreeze.packages.${pkgs.system}.wayfreeze ];
 ```
+
+### AUR
+
+There is an AUR package available at https://aur.archlinux.org/packages/wayfreeze-git.
+
+Note: I do not maintain this package myself.
 
 ### From source:
 
