@@ -82,6 +82,8 @@ Then, you can either run the following command to build the project:
 cargo build --release
 ```
 
+And your binary will be located at `./target/release/wayfreeze`.
+
 Or, you can run the following command to install it (as your user):
 
 ```
