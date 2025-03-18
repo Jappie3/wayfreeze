@@ -74,7 +74,19 @@ Note: I do not maintain this package myself.
 
 ### From source:
 
-First, make sure you have Rust & Cargo installed. Then clone this repo & run `cargo build --release`, the compiled binary should be under `./target/release/wayfreeze`.
+Firstly, ensure you have Rust, Cargo, and the libxkbcommon development headers.
+
+Then, you can either run the following command to build the project:
+
+```
+cargo build --release
+```
+
+Or, you can run the following command to install it (as your user):
+
+```
+cargo install --path .
+```
 
 ## Technical
 
