@@ -91,8 +91,8 @@ struct AppData {
     after_cmd: String,
     before_timeout: u64,
     after_timeout: u64,
+    configured_surfaces: HashMap<i64, u32>,
     frames_ready: i32,
-    surfaces_ready: i32,
     outputs_ready: i32,
     output_count: i32,
     exit: bool,
@@ -466,7 +466,7 @@ impl Dispatch<zwlr_layer_shell_v1::ZwlrLayerShellV1, ()> for AppData {
 
 impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, i64> for AppData {
     fn event(
-        _state: &mut Self,
+        state: &mut Self,
         proxy: &zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
         event: <zwlr_layer_surface_v1::ZwlrLayerSurfaceV1 as Proxy>::Event,
         data: &i64,
@@ -485,6 +485,37 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, i64> for AppData {
                 );
                 // acknowledge the Configure event
                 proxy.ack_configure(serial);
+
+                if state.configured_surfaces.contains_key(data) {
+                    debug!(
+                        "| Surface {} has already been configured, ignoring new Configure event",
+                        data
+                    );
+                    return;
+                }
+
+                let Some(surfaces) = &state.surfaces else {
+                    error!("No WlSurface loaded");
+                    return;
+                };
+                let Some(buffers) = &state.buffers else {
+                    error!("No WlBuffers loaded");
+                    return;
+                };
+                let Some(transforms) = &state.transforms else {
+                    error!("No transforms loaded");
+                    return;
+                };
+                trace!("  committing to surface {} before attaching buffers", data);
+                surfaces[data].commit(); // commit before attaching any buffers
+
+                trace!("  attaching buffer to surface");
+                surfaces[data].attach(Some(&buffers[data]), 0, 0);
+                surfaces[data].set_buffer_scale(1);
+                surfaces[data].set_buffer_transform(transforms[data]);
+                surfaces[data].commit();
+
+                state.configured_surfaces.insert(*data, serial);
             }
             zwlr_layer_surface_v1::Event::Closed => {
                 debug!(
@@ -799,7 +830,6 @@ impl ScreenFreezer {
 
         self.state.outputs_ready = 0;
         self.state.frames_ready = 0;
-        self.state.surfaces_ready = 0;
 
         self.event_queue.blocking_dispatch(&mut self.state).unwrap();
 
@@ -925,6 +955,14 @@ impl ScreenFreezer {
             ls.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
 
             vec_insert(&mut self.state.layer_surfaces, i, ls);
+        }
+
+        // wl_layer_surfaces created, let's do wl_surfaces next
+        for i in 0..outputs.len() as i64 {
+            let Some(surfaces) = &self.state.surfaces else {
+                error!("No WlSurface loaded");
+                return Ok(());
+            };
 
             surfaces[&i].commit();
 
@@ -944,47 +982,9 @@ impl ScreenFreezer {
             );
             // create add-on object for the surface so that compositor can request fractional scales, will send preferred_scale event
             fs_manager.get_fractional_scale(&surfaces[&i], &self.queue_handle, i);
-
-            // wait for the PreferredScale event
-            self.event_queue.blocking_dispatch(&mut self.state).unwrap();
-
-            let Some(surfaces) = &self.state.surfaces else {
-                error!("No WlSurface loaded");
-                return Ok(());
-            };
-            let Some(buffers) = &self.state.buffers else {
-                error!("No WlBuffers loaded");
-                return Ok(());
-            };
-            let Some(transforms) = &self.state.transforms else {
-                error!("No transforms loaded");
-                return Ok(());
-            };
-            trace!("  committing to surface {} before attaching buffers", i);
-            surfaces[&i].commit(); // commit before attaching any buffers
-
-            trace!("  attaching buffer to surface");
-            surfaces[&i].attach(Some(&buffers[&i]), 0, 0);
-            surfaces[&i].set_buffer_scale(1);
-            surfaces[&i].set_buffer_transform(transforms[&i]);
-            surfaces[&i].commit();
-            self.state.surfaces_ready += 1;
-
-            let Some(screencopy_frames) = &self.state.screencopy_frames else {
-                error!("No ZwlrScreencopyFrame loaded");
-                return Ok(());
-            };
-            let Some(shm_pools) = &self.state.shm_pools else {
-                error!("No WlShmPool loaded");
-                return Ok(());
-            };
-            // clean up screencopy_frame & pool
-            screencopy_frames[&i].destroy();
-            shm_pools[&i].destroy();
-            buffers[&i].destroy();
         }
 
-        while self.state.surfaces_ready != self.state.output_count as i32 {
+        while self.state.configured_surfaces.len() != self.state.output_count as usize {
             self.event_queue.blocking_dispatch(&mut self.state).unwrap();
         }
         info!("> Screen frozen");
