@@ -861,14 +861,6 @@ impl ScreenFreezer {
                 error!("No WlShm loaded");
                 return Ok(());
             };
-            let Some(widths) = &self.state.widths else {
-                error!("Could not load widths");
-                return Ok(());
-            };
-            let Some(heights) = &self.state.heights else {
-                error!("Could not load heights");
-                return Ok(());
-            };
             let Some(phys_widths) = &self.state.phys_widths else {
                 error!("Could not load widths");
                 return Ok(());
