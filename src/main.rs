@@ -63,6 +63,7 @@ where
 /// (what the user sees), we apply the inverse transform to cancel this out.
 fn inverse_transform(transform: wl_output::Transform) -> wl_output::Transform {
     use wl_output::Transform;
+
     match transform {
         Transform::Normal => Transform::Normal,
         Transform::_90 => Transform::_270,
@@ -117,6 +118,7 @@ struct AppData {
     output_count: i32,
     exit: bool,
     enable_keyboard: bool,
+    apply_inverse_transform: bool,
 }
 
 impl Dispatch<wl_registry::WlRegistry, ()> for AppData {
@@ -533,7 +535,12 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, i64> for AppData {
                 trace!("  attaching buffer to surface");
                 surfaces[data].attach(Some(&buffers[data]), 0, 0);
                 surfaces[data].set_buffer_scale(1);
-                surfaces[data].set_buffer_transform(inverse_transform(transforms[data]));
+                let buffer_transform = if state.apply_inverse_transform {
+                    inverse_transform(transforms[data])
+                } else {
+                    transforms[data]
+                };
+                surfaces[data].set_buffer_transform(buffer_transform);
                 surfaces[data].commit();
 
                 state.configured_surfaces.insert(*data, serial);
@@ -811,6 +818,7 @@ impl ScreenFreezer {
         before_timeout: u64,
         after_timeout: u64,
         enable_keyboard: bool,
+        apply_inverse_transform: bool,
     ) -> Result<Self, Box<dyn Error>> {
         let connection = Connection::connect_to_env().unwrap();
         let mut event_queue = connection.new_event_queue();
@@ -824,6 +832,7 @@ impl ScreenFreezer {
         state.before_timeout = before_timeout;
         state.after_timeout = after_timeout;
         state.enable_keyboard = enable_keyboard;
+        state.apply_inverse_transform = apply_inverse_transform;
 
         event_queue.roundtrip(&mut state).unwrap();
         info!("> Received all globals");
@@ -1047,6 +1056,9 @@ struct Args {
     /// Enable keyboard
     #[arg(long, required = false, default_value_t = false)]
     enable_keyboard: bool,
+    /// Disable applying inverse output transform
+    #[arg(long, required = false, default_value_t = false)]
+    disable_inverse_transform: bool,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -1061,6 +1073,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         args.before_freeze_timeout,
         args.after_freeze_timeout,
         args.enable_keyboard,
+        !args.disable_inverse_transform,
     ) {
         Ok(mut sf) => sf.freeze().unwrap(),
         Err(e) => panic!("Could not create ScreenFreezer: {}", e),
