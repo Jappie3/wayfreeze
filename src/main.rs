@@ -56,26 +56,6 @@ where
     }
 }
 
-/// Returns the inverse of a wl_output transform.
-///
-/// When displaying a screencopy buffer on a layer surface, the compositor applies
-/// the output's transform. Since screencopy captures in post-transform orientation
-/// (what the user sees), we apply the inverse transform to cancel this out.
-fn inverse_transform(transform: wl_output::Transform) -> wl_output::Transform {
-    use wl_output::Transform;
-    match transform {
-        Transform::Normal => Transform::Normal,
-        Transform::_90 => Transform::_270,
-        Transform::_180 => Transform::_180,
-        Transform::_270 => Transform::_90,
-        Transform::Flipped => Transform::Flipped,
-        Transform::Flipped90 => Transform::Flipped270,
-        Transform::Flipped180 => Transform::Flipped180,
-        Transform::Flipped270 => Transform::Flipped90,
-        _ => Transform::Normal,
-    }
-}
-
 #[derive(Default)]
 struct AppData {
     compositor: Option<(wl_compositor::WlCompositor, u32)>,
@@ -533,7 +513,7 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, i64> for AppData {
                 trace!("  attaching buffer to surface");
                 surfaces[data].attach(Some(&buffers[data]), 0, 0);
                 surfaces[data].set_buffer_scale(1);
-                surfaces[data].set_buffer_transform(inverse_transform(transforms[data]));
+                surfaces[data].set_buffer_transform(transforms[data]);
                 surfaces[data].commit();
 
                 state.configured_surfaces.insert(*data, serial);
