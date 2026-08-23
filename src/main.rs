@@ -755,17 +755,36 @@ impl Dispatch<WpFractionalScaleV1, i64> for AppData {
                     error!("Could not load heights");
                     return;
                 };
+                let Some(phys_heights) = &state.phys_heights else {
+                    error!("Could not load phys_heights");
+                    return;
+                };
+                let Some(phys_widths) = &state.phys_widths else {
+                    error!("Could not load phys_widths");
+                    return;
+                };
+
+                let normalized_scale = scale as f64 / 120.0;
                 trace!(
                     "  setting scale to {}/120 = {}, width: {} height: {}",
                     scale,
-                    scale as f64 / 120.0,
+                    normalized_scale,
                     widths[data],
                     heights[data]
                 );
 
-                // set source & destination rectangle
-                viewports[data].set_source(-1.0, -1.0, -1.0, -1.0);
+                // "The buffer size is calculated by multiplying the surface size by the intended scale."
+                // "For toplevel surfaces, the size is rounded halfway away from zero."
+                let w = (widths[data] as f64 * normalized_scale).round();
+                let h = (heights[data] as f64 * normalized_scale).round();
+
+                if w <= phys_widths[data] as f64 && h <= phys_heights[data] as f64 {
+                  viewports[data].set_source(0.0, 0.0, w, h);
+                } else {
+                  viewports[data].set_source(-1.0, -1.0, -1.0, -1.0); // fallback
+                };
                 viewports[data].set_destination(widths[data] as i32, heights[data] as i32);
+
                 // update layer surface size every time the preferred scale changes
                 layer_surfaces[data].set_size(widths[data] as u32, heights[data] as u32);
                 surfaces[data].commit();
