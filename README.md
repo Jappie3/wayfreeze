@@ -22,6 +22,8 @@ Options:
           Amount of milliseconds to wait between freezing the screen and running after-freeze-cmd
       --enable-keyboard
           To enable keyboard input when freezing the screen
+      --inverse-transform
+          Apply an inverse transform to the buffer when displaying it. This may be necessary due to inconsistent compositor behaviour regarding rotated output
   -h, --help
           Print help
   -V, --version

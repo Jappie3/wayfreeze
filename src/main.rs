@@ -56,6 +56,26 @@ where
     }
 }
 
+/// Returns the inverse of a wl_output transform.
+///
+/// Compositor behaviour regarding rotated buffers on rotated outputs is quite inconsistent, this
+/// function can optionally be used to apply an inverse transform to the buffer when committing it
+/// to the layer surface.
+fn get_inverse_transform(transform: wl_output::Transform) -> wl_output::Transform {
+    use wl_output::Transform;
+    match transform {
+        Transform::Normal => Transform::Normal,
+        Transform::_90 => Transform::_270,
+        Transform::_180 => Transform::_180,
+        Transform::_270 => Transform::_90,
+        Transform::Flipped => Transform::Flipped,
+        Transform::Flipped90 => Transform::Flipped270,
+        Transform::Flipped180 => Transform::Flipped180,
+        Transform::Flipped270 => Transform::Flipped90,
+        _ => Transform::Normal,
+    }
+}
+
 #[derive(Default)]
 struct AppData {
     compositor: Option<(wl_compositor::WlCompositor, u32)>,
@@ -97,6 +117,7 @@ struct AppData {
     output_count: i32,
     exit: bool,
     enable_keyboard: bool,
+    inverse_transform: bool,
 }
 
 impl Dispatch<wl_registry::WlRegistry, ()> for AppData {
@@ -513,7 +534,12 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, i64> for AppData {
                 trace!("  attaching buffer to surface");
                 surfaces[data].attach(Some(&buffers[data]), 0, 0);
                 surfaces[data].set_buffer_scale(1);
-                surfaces[data].set_buffer_transform(transforms[data]);
+                let buffer_transform = if state.inverse_transform {
+                    get_inverse_transform(transforms[data])
+                } else {
+                    transforms[data]
+                };
+                surfaces[data].set_buffer_transform(buffer_transform);
                 surfaces[data].commit();
 
                 state.configured_surfaces.insert(*data, serial);
@@ -791,6 +817,7 @@ impl ScreenFreezer {
         before_timeout: u64,
         after_timeout: u64,
         enable_keyboard: bool,
+        inverse_transform: bool,
     ) -> Result<Self, Box<dyn Error>> {
         let connection = Connection::connect_to_env().unwrap();
         let mut event_queue = connection.new_event_queue();
@@ -804,6 +831,7 @@ impl ScreenFreezer {
         state.before_timeout = before_timeout;
         state.after_timeout = after_timeout;
         state.enable_keyboard = enable_keyboard;
+        state.inverse_transform = inverse_transform;
 
         event_queue.roundtrip(&mut state).unwrap();
         info!("> Received all globals");
@@ -1027,6 +1055,10 @@ struct Args {
     /// Enable keyboard
     #[arg(long, required = false, default_value_t = false)]
     enable_keyboard: bool,
+    /// Apply an inverse transform to the buffer when displaying it. This may be necessary due to
+    /// inconsistent compositor behaviour regarding rotated outputs.
+    #[arg(long, required = false, default_value_t = false)]
+    inverse_transform: bool,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -1041,6 +1073,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         args.before_freeze_timeout,
         args.after_freeze_timeout,
         args.enable_keyboard,
+        args.inverse_transform,
     ) {
         Ok(mut sf) => sf.freeze().unwrap(),
         Err(e) => panic!("Could not create ScreenFreezer: {}", e),
